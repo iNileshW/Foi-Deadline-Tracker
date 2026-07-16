@@ -579,3 +579,71 @@ suite that runs the whole drill on every push.
   is only half-covered — audit log exists, retention rule does not).
 
 ---
+
+## 2026-07-16 — Add GitHub Actions CI pipeline
+
+**Goal:** set up the CI pipeline next.
+
+**Files:**
+- `.github/workflows/ci.yml` (new — three jobs)
+- `backup.py` (bandit `# nosec B608` on the `SELECT COUNT(*) FROM
+  "<table>"` in `_table_counts` — table name is from sqlite_master,
+  not user input)
+- `deadlines.py` (bandit `# nosec B310` on `urllib.request.urlopen`
+  — URL is a hardcoded https constant, not user input)
+- `README.md` (CI badge, local scan commands, CI job overview)
+- `CLAUDE.md` (defect list — CI item closed)
+
+**Rationale:** 60 tests exist locally. Without CI, they run when
+someone remembers to run them. With CI, they run on every push and
+pull request and no unreviewed regression can reach `main`. The brief
+lists CI as its own direction — this operationalises the guardrails
+built in the previous six changes.
+
+**Design choices:**
+- **Three jobs, no deploy.** Test, security, package. Deploy is
+  deliberately not automated because there is no shared production
+  target — automating a broken deploy path is worse than not
+  automating one. Package uploads a versioned tarball on merges to
+  `main` so the artifact story is at least ready.
+- **Python matrix 3.11 / 3.12 / 3.13.** Cheap, catches version-
+  sensitive bugs (like the `datetime.utcnow` deprecation caught
+  earlier). `fail-fast: false` so a single-version failure does not
+  hide the others.
+- **`concurrency` block** cancels in-progress runs for the same ref
+  to save minutes on force-pushes.
+- **Bandit** in SAST mode, `-ll` reports Low severity and above,
+  Low confidence and above. Excludes `tests/` (fixtures contain
+  deliberate hostile inputs), `templates/`, `.github/`, `backups/`.
+  Two findings triaged as false positives and annotated `# nosec`
+  in-source with a reason:
+    - `backup.py:_table_counts` uses `sqlite_master.name` in an
+      f-string COUNT query. Identifiers cannot be parameter-bound;
+      the value never touches user input.
+    - `deadlines.py:load_bank_holidays` calls `urllib.request.urlopen`
+      on a hardcoded https URL. Not user-controlled.
+- **pip-audit** runs `--strict` against both `requirements.txt` and
+  `requirements-dev.txt`. `--strict` fails the job on any known
+  vulnerable dependency, not just when audit itself errors.
+- **`actions/setup-python@v5` with `cache: pip`** — cheap install-
+  time optimisation across the matrix.
+
+**Verification (local dry run):**
+- `bandit -r . -x ./tests,./templates,./.github,./backups -ll` — 0
+  issues after the two `# nosec` annotations, 2 suppressed with
+  reasons in the source.
+- `pip-audit --strict -r requirements.txt` — no vulnerabilities.
+- `pip-audit --strict -r requirements-dev.txt` — no vulnerabilities.
+- `python3 -m pytest tests/` — 60 passed.
+
+**Verification (remote):** to be observed after the push in the
+"Actions" tab of the GitHub repo.
+
+**Follow-ups (next):**
+- Container (`Dockerfile` + `docker-compose.yml`). Now that CI can
+  build an image, doing so becomes a real deploy story.
+- Pin `flask` (and any transitive deps we care about) in
+  `requirements.txt` so pip-audit results are reproducible.
+- Rate-limit `/login`; team-scoping; UK GDPR retention.
+
+---

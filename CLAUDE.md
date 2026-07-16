@@ -23,13 +23,15 @@ Fixed:
 - ~~No RBAC.~~ Partial: `admin_required` decorator gates `/audit`. Role column consulted at request time.
 - ~~`foi.db` backup = Gary's USB stick, Fridays, "usually".~~ Fixed: `backup.py` uses SQLite online-backup API (safe under concurrent writes), writes a manifest (sha256, size, table counts) beside each snapshot, prunes to keep-N. `restore.py` verifies the backup before overwriting and keeps a pre-restore safety copy. 10 backup/restore tests including a full round-trip drill. Off-machine copy is left to `rsync` / S3 sync by design.
 
+- ~~No CI.~~ Fixed: `.github/workflows/ci.yml`. Three jobs — pytest across Python 3.11/3.12/3.13, bandit SAST + pip-audit on both requirements files, and a `main`-only tarball artifact. Deploy step deliberately not automated (no target env).
+
 Still open:
 - No team-based data separation on requests (`team` on users, not yet joined against a `team` column on requests).
 - `seed.py:10-11` — deletes `foi.db` unconditionally on run. Destructive.
-- `foi.db` lives next to code. Backup = Gary's USB stick, Fridays, "usually".
-- No CI. No container.
+- No container.
 - `requirements.txt` — unpinned `flask` only.
 - No rate limiting on `/login`. Brute-force protection is on the to-do list.
+- UK GDPR retention policy on requester name/address is undefined.
 
 ## Architecture
 

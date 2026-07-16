@@ -50,8 +50,10 @@ def _table_counts(path: Path) -> dict[str, int]:
                 "WHERE type='table' AND name NOT LIKE 'sqlite_%'"
             )
         ]
+        # Table names come from sqlite_master, not user input, and are
+        # double-quoted. Parameter binding is not available for identifiers.
         return {
-            n: conn.execute(f'SELECT COUNT(*) FROM "{n}"').fetchone()[0]
+            n: conn.execute(f'SELECT COUNT(*) FROM "{n}"').fetchone()[0]  # nosec B608
             for n in names
         }
     finally:

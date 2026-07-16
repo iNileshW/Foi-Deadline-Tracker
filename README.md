@@ -1,5 +1,7 @@
 # FOI Deadline Tracker
 
+[![CI](https://github.com/iNileshW/Foi-Deadline-Tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/iNileshW/Foi-Deadline-Tracker/actions/workflows/ci.yml)
+
 Tracks Freedom of Information requests for the DfT central FOI team and
 calculates the statutory 20-working-day response deadline.
 
@@ -49,6 +51,28 @@ See `.env.example`.
 pip install -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
+
+## Security scans (local)
+
+CI runs the same checks on every push and pull request via
+`.github/workflows/ci.yml`.
+
+```
+pip install bandit pip-audit
+bandit -r . -x ./tests,./templates,./.github,./backups -ll
+pip-audit --strict -r requirements.txt
+pip-audit --strict -r requirements-dev.txt
+```
+
+## CI
+
+Three jobs, GitHub Actions:
+
+- **Tests** — pytest across Python 3.11 / 3.12 / 3.13.
+- **Security scans** — bandit SAST and pip-audit on both requirements files.
+- **Package** — on merges to `main`, uploads a timestamped tarball artifact
+  (30-day retention). Deploy is deliberately not automated — no shared
+  target environment yet.
 
 ## Backup and restore
 

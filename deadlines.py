@@ -31,7 +31,8 @@ def load_bank_holidays(refresh: bool = False) -> set[date]:
     the cache is missing, fetch from GOV.UK and rewrite the cache.
     """
     if refresh or not CACHE_PATH.exists():
-        with urllib.request.urlopen(BANK_HOLIDAYS_URL, timeout=10) as resp:
+        # URL is a hardcoded https constant, not user input.
+        with urllib.request.urlopen(BANK_HOLIDAYS_URL, timeout=10) as resp:  # nosec B310
             payload = json.load(resp)
         CACHE_PATH.write_text(json.dumps(payload, indent=2))
     else:
