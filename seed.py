@@ -1,20 +1,31 @@
-# Creates foi.db and loads some sample requests.
-# Run once: python seed.py  (deletes any existing database!)
+"""Seed the FOI database with sample requests.
 
+Usage:
+    python seed.py [--db PATH] [--force] [--yes]
+
+Semantics:
+- No DB at `--db` path: create it and insert the sample rows.
+- DB exists but contains no requests: initialise the schema and
+  insert the sample rows.
+- DB exists AND contains requests: refuse to run. Pass `--force` to
+  wipe and reseed. `--force` alone still prompts on stdin; add
+  `--yes` for scripted runs.
+
+The old version deleted `foi.db` unconditionally on every invocation.
+That is data loss waiting to happen the moment someone re-runs a
+setup script against a live database.
+"""
+
+from __future__ import annotations
+
+import argparse
 import os
 import sqlite3
+import sys
 from datetime import date, timedelta
 
 from deadlines import calculate_deadline
 from schema import init_all
-
-DB = os.environ.get("FOI_DB", "foi.db")
-
-if os.path.exists(DB):
-    os.remove(DB)
-
-conn = sqlite3.connect(DB)
-init_all(conn)
 
 SAMPLE = [
     # (ref, requester, subject, days_ago, status, team)
@@ -32,17 +43,110 @@ SAMPLE = [
     ("FOI-2026-0187", "L. Fortescue", "Bridge inspection reports for the A38", 0, "Received", "roads"),
 ]
 
-for ref, requester, subject, days_ago, status, team in SAMPLE:
-    received = date.today() - timedelta(days=days_ago)
-    deadline = calculate_deadline(received)
-    conn.execute(
-        "INSERT INTO requests "
-        "(ref, requester, subject, received, deadline, status, notes, team) "
-        "VALUES (?, ?, ?, ?, ?, ?, '', ?)",
-        (ref, requester, subject, received.isoformat(), deadline.isoformat(), status, team),
-    )
 
-conn.commit()
-conn.close()
-print(f"Seeded {DB} with {len(SAMPLE)} requests")
-print("No users created. Add one with: python create_user.py EMAIL ROLE TEAM")
+class SeedRefused(RuntimeError):
+    """Raised when the caller has data at the target path and did not
+    pass `force=True`, or when interactive confirmation was declined."""
+
+
+def _has_requests(conn: sqlite3.Connection) -> bool:
+    row = conn.execute("SELECT COUNT(*) FROM requests").fetchone()
+    return int(row[0]) > 0
+
+
+def _insert_samples(conn: sqlite3.Connection) -> int:
+    for ref, requester, subject, days_ago, status, team in SAMPLE:
+        received = date.today() - timedelta(days=days_ago)
+        deadline = calculate_deadline(received)
+        conn.execute(
+            "INSERT INTO requests "
+            "(ref, requester, subject, received, deadline, status, notes, team) "
+            "VALUES (?, ?, ?, ?, ?, ?, '', ?)",
+            (ref, requester, subject, received.isoformat(), deadline.isoformat(), status, team),
+        )
+    conn.commit()
+    return len(SAMPLE)
+
+
+def seed(
+    db_path: str,
+    *,
+    force: bool = False,
+    yes: bool = False,
+    confirmer=None,
+) -> int:
+    """Seed `db_path`. Returns the number of rows inserted.
+
+    `confirmer(prompt) -> bool` is injectable for tests. In real use
+    it's an `input()`-based prompt on stdin.
+    """
+    if os.path.exists(db_path):
+        conn = sqlite3.connect(db_path)
+        init_all(conn)
+        has_data = _has_requests(conn)
+        conn.close()
+        if has_data:
+            if not force:
+                raise SeedRefused(
+                    f"{db_path} already contains requests. "
+                    "Refusing to overwrite. "
+                    "Back it up with `python backup.py foi.db backups` "
+                    "and re-run with --force."
+                )
+            if not yes:
+                if confirmer is None:
+                    confirmer = _stdin_confirm
+                if not confirmer(
+                    f"WARNING: this will DELETE all data in {db_path}. "
+                    "Type 'yes' to continue: "
+                ):
+                    raise SeedRefused("aborted by user")
+        os.remove(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        init_all(conn)
+        n = _insert_samples(conn)
+    finally:
+        conn.close()
+    return n
+
+
+def _stdin_confirm(prompt: str) -> bool:
+    try:
+        answer = input(prompt).strip().lower()
+    except EOFError:
+        return False
+    return answer == "yes"
+
+
+def main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(
+        description="Seed the FOI database with sample requests.",
+    )
+    p.add_argument(
+        "--db", default=os.environ.get("FOI_DB", "foi.db"),
+        help="Path to the SQLite database. Default: $FOI_DB or foi.db.",
+    )
+    p.add_argument(
+        "--force", action="store_true",
+        help="Wipe and reseed even if the target DB already has data.",
+    )
+    p.add_argument(
+        "--yes", action="store_true",
+        help="Skip the interactive confirmation (use with --force in scripts).",
+    )
+    args = p.parse_args(argv[1:])
+
+    try:
+        n = seed(args.db, force=args.force, yes=args.yes)
+    except SeedRefused as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(f"Seeded {args.db} with {n} requests")
+    print("No users created. Add one with: python create_user.py EMAIL ROLE TEAM")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

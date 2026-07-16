@@ -16,7 +16,8 @@ his desk. If it's down, ask Gary to turn his machine back on.
 
 ```
 pip install -r requirements.txt
-python seed.py       # creates foi.db with sample data (wipes existing data!)
+python seed.py       # creates foi.db with sample data
+                     # refuses to run if foi.db already has requests; pass --force --yes to reseed
 python create_user.py alice@example.gov.uk caseworker central  # prompts for password
 
 # Production: set a real secret.

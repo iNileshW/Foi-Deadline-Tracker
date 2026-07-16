@@ -34,8 +34,9 @@ Fixed:
 
 - ~~`requirements.txt` unpinned.~~ Fixed: full lockfile-style pinning of direct and transitive deps in `requirements.txt` (runtime) and `requirements-dev.txt` (adds pytest). pip-audit and Docker builds are now reproducible.
 
-Still open:
-- `seed.py:11` — deletes the DB file unconditionally on run. Destructive.
+- ~~`seed.py` deletes the DB file unconditionally.~~ Fixed: refactored into a `seed()` fn + `main()` CLI. Refuses to run if the target DB already contains requests. `--force` alone still prompts on stdin; `--force --yes` for scripted wipes. 9 seed tests cover fresh install, empty-DB reseed, refusal on populated DB, `--force` + declined confirm, `--force --yes` wipes.
+
+Still open (nice-to-have, not audit-blocking):
 
 ## Architecture
 

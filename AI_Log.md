@@ -1102,3 +1102,68 @@ demonstrable).
   (currently only via SQL).
 
 ---
+
+## 2026-07-17 — Kill the destructive seed.py
+
+**Goal:** kill the destructive seed.py next.
+
+**Files:**
+- `seed.py` (refactored to `seed()` + `main()`; refuses to run over
+  a populated DB unless `--force --yes`)
+- `tests/test_seed.py` (new — 9 tests)
+- `README.md`, `CLAUDE.md` re-scored
+
+**Rationale:** The old script's first line inside the `main` block
+was `if os.path.exists(DB): os.remove(DB)`. Anyone re-running
+`python seed.py` against a live DB — a fresh operator following
+old docs, an automation loop that "just re-inits", a Dockerfile
+that forgets an idempotency check — deletes every request the team
+has logged. This is the same class of danger as `DROP TABLE` in a
+cron.
+
+**Design choices:**
+- **CLI safety layers, three of them:**
+  1. Default (no flags): run only if the DB does not exist OR
+     exists but has zero rows. Anything else raises `SeedRefused`.
+  2. `--force`: allowed to wipe, but still prompts on stdin.
+  3. `--force --yes`: script-friendly.
+- **`SeedRefused` exception**, not a generic `RuntimeError`, so
+  callers can catch specifically.
+- **`confirmer` parameter is injectable.** Tests pass in a lambda;
+  production uses stdin. Keeps the destructive path testable
+  without monkey-patching `input`.
+- **`seed()` function is pure library.** Import-time no longer has
+  side effects. Tests can call it with a `tmp_path` DB. The old
+  script ran everything at module import, which meant even
+  importing `seed` had side effects — dangerous.
+- **`main(argv)` returns an int.** `sys.exit(main(sys.argv))` at
+  the bottom. Matches the pattern used by `create_user.py`,
+  `backup.py`, `restore.py`, `retention.py` — one CLI shape
+  across the project.
+- **Behaviour on an *empty* existing DB is safe.** If someone
+  created `foi.db` with just the schema (no rows), `seed` proceeds
+  without complaint — the destructive path is only tripped when
+  actual request data is present.
+
+**Test coverage (`tests/test_seed.py`, 9 tests):**
+- Fresh install: no DB → 12 rows inserted.
+- Empty DB with schema present → 12 rows inserted.
+- Populated DB, no flags → `SeedRefused` raised, data preserved.
+- `force=True` alone with a confirmer returning False → aborted,
+  data preserved.
+- `force=True` with a confirmer returning True → wipes + reseeds.
+- `force=True, yes=True` → wipes + reseeds, custom row gone.
+- CLI on populated DB → exit code 1, data preserved.
+- CLI on fresh install → exit code 0, 12 rows.
+- CLI with `--force --yes` on populated DB → exit code 0, reseeded.
+
+**Verification:** `python3 -m pytest tests/` → 112 passed
+(10 deadline + 6 injection + 6 config + 15 auth + 13 audit +
+ 10 backup + 3 healthz + 13 ratelimit + 12 team_scope + 15 retention
+ + 9 seed).
+
+**Follow-ups (next):**
+- Nice-to-have: admin UI to reassign a request's team (currently
+  only via SQL / a follow-up CLI).
+
+---
