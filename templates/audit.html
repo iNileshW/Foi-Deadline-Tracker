@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+  <h2>Audit trail</h2>
+  <p class="hint">Latest 200 events. Rows are append-only.</p>
+  <table>
+    <tr>
+      <th>When (UTC)</th>
+      <th>Actor</th>
+      <th>Action</th>
+      <th>Target</th>
+      <th>Before</th>
+      <th>After</th>
+      <th>IP</th>
+    </tr>
+    {% for e in events %}
+    <tr>
+      <td>{{ e.occurred_at }}</td>
+      <td>{{ e.actor_email or '(anonymous)' }}</td>
+      <td>{{ e.action }}</td>
+      <td>
+        {% if e.target_type %}
+          {{ e.target_type }}#{{ e.target_id }}
+        {% else %}—{% endif %}
+      </td>
+      <td><code>{{ e.before_json or '' }}</code></td>
+      <td><code>{{ e.after_json or '' }}</code></td>
+      <td>{{ e.ip or '' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+{% endblock %}

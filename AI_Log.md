@@ -382,3 +382,101 @@ without the hotfix would break for anyone running against the
 inherited `foi.db`.
 
 ---
+
+## 2026-07-16 — Add append-only audit trail
+
+**Goal:** next priority chosen as audit log (ICO auditor's direct
+question: "who has accessed this requester's record?").
+
+**Files:**
+- `audit.py` (new — `init_audit_table`, `record_event`, `list_events`)
+- `auth.py` (new `admin_required` decorator, keeps DB indirection)
+- `app.py` (audit-writes on `/login` success + failure, `/logout`,
+  `/new`, `/request/<id>` POST; new admin-only `/audit` route;
+  `get_db()` now also idempotently creates the audit table)
+- `templates/audit.html` (new — 200-row viewer with before/after JSON)
+- `templates/base.html` (nav shows "Audit" link for admins only)
+- `seed.py` (calls `init_audit_table`)
+- `tests/test_audit.py` (new — 13 tests)
+- `CLAUDE.md` re-scored: audit log closed; RBAC now partial.
+
+**Rationale:** The Freedom of Information Act, UK GDPR, and the ICO
+audit brief all converge on one question — *who* did *what*, *when*.
+Without a change trail, the department cannot answer that question
+for any record in the tracker. Authentication alone tells you who is
+signed in *now*; the audit table tells you who was signed in when the
+status flipped, when a record was created, when an unknown email
+tried to log in ten times in a minute.
+
+**Design choices:**
+- Append-only from the app's perspective. The application code has
+  no UPDATE or DELETE against `audit_events`. Retention/rotation is
+  a DBA / backup concern.
+- Actor identity denormalised: `actor_id` **and** `actor_email` are
+  both stored. Emails survive user deletion so the auditor can still
+  read "alice@dft.gov.uk did X" a year after Alice left. `actor_id`
+  is nullable for pre-auth events (failed logins).
+- Before/after snapshots stored as JSON strings. Human-readable in
+  the admin viewer; queryable enough to diff without a specialised
+  tool. `sort_keys=True` for stable ordering.
+- Login failures record the *attempted* email so brute-force is
+  visible in the trail. Passwords are never touched by
+  `record_event`; a dedicated test proves the attempted password is
+  nowhere in the row.
+- User-Agent truncated to 255 chars (log-poisoning defence).
+- Two indexes: `(target_type, target_id)` for "show me everything
+  that touched this request" and `(actor_id, occurred_at)` for
+  "show me everything Alice did last week".
+- `admin_required(load_user)` follows the same DB-injection pattern
+  as `current_user()` — `auth.py` stays free of a direct DB import.
+- The audit viewer sits at `/audit`, admin-only, 200-row hard cap.
+  Filter by `?target_type=request&target_id=42`.
+
+**Schema:**
+```
+audit_events(
+  id, occurred_at, actor_id, actor_email, action,
+  target_type, target_id, before_json, after_json, ip, user_agent
+)
+```
+Actions: `login.success`, `login.failure`, `logout`,
+`request.create`, `request.update`. `request.view` is reserved.
+
+**Test coverage (13 tests):**
+- `login.success` writes actor_id + email + ip.
+- `login.failure` writes NULL actor_id and the attempted email.
+- Failed-login password is never persisted anywhere in the row
+  (search across every column).
+- `logout` writes actor identity.
+- `request.create` writes an `after` JSON with the seeded fields;
+  `before` is NULL.
+- `request.update` writes both `before` and `after`; the values
+  match the SELECT before UPDATE and the SELECT after UPDATE.
+- `/audit` returns 403 for a logged-in caseworker.
+- `/audit` returns 200 for an admin and includes at least one
+  seeded event.
+- `/audit` redirects anonymous callers to `/login`.
+- Both audit indexes exist in the schema.
+- `record_event` refuses unknown action names.
+- Overly long User-Agent is truncated to 255 chars.
+- `list_events(target_type, target_id)` filter returns only the
+  matching rows.
+
+**Verification:** `python3 -m pytest tests/` → 50 passed
+(10 deadline + 6 injection + 6 config + 15 auth + 13 audit).
+
+**Live smoke:** restarted the running app, logged in as
+`admin@dft.gov.uk`, `GET /audit` → HTTP 200 with the login events
+visible. Non-admin session (caseworker) receives 403.
+
+**Follow-ups (next):**
+- RBAC: gate `POST /new`, `POST /request/<id>` where write access
+  should be scoped (currently any authenticated user can edit any
+  request).
+- Team-based data separation on `requests`.
+- Backups + a proven restore drill (recoverability axis is still
+  untouched).
+- Rate limit `/login`; the trail records brute-force but nothing
+  currently *slows* it down.
+
+---

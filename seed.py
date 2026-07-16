@@ -5,6 +5,7 @@ import os
 import sqlite3
 from datetime import date, timedelta
 
+from audit import init_audit_table
 from deadlines import calculate_deadline
 from users import init_users_table
 
@@ -25,6 +26,7 @@ conn.execute("""
     )
 """)
 init_users_table(conn)
+init_audit_table(conn)
 
 SAMPLE = [
     ("FOI-2026-0141", "J. Whitfield", "Pothole repair spend by borough, 2024-2026", 38, "Responded"),

@@ -13,6 +13,8 @@ from functools import wraps
 
 from flask import abort, g, redirect, request, session, url_for
 
+_admin_load_user = None  # set by the app at startup, used by admin_required
+
 
 def current_user(load_user):
     """Return the current User (cached on flask.g) or None.
@@ -45,6 +47,29 @@ def login_required(view):
         return view(*args, **kwargs)
 
     return wrapped
+
+
+def admin_required(load_user):
+    """Return a decorator that gates a view on role == 'admin'.
+
+    `load_user(user_id)` is injected by the app so this module stays
+    free of a direct DB dependency.
+    """
+
+    def decorator(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            uid = session.get("user_id")
+            if uid is None:
+                return redirect(url_for("login", next=request.path))
+            user = load_user(uid)
+            if user is None or user.role != "admin":
+                abort(403)
+            return view(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
 
 
 def get_csrf_token() -> str:

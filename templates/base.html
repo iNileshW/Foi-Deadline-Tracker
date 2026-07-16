@@ -33,6 +33,9 @@
     {% if current_user %}
     <div class="user">
       Signed in as <strong>{{ current_user.email }}</strong> ({{ current_user.team }})
+      {% if current_user.role == 'admin' %}
+        &middot; <a href="/audit">Audit</a>
+      {% endif %}
       &middot;
       <form method="post" action="/logout">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
