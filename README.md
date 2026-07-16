@@ -50,6 +50,49 @@ pip install -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
 
+## Backup and restore
+
+The tracker uses SQLite's online backup API — safe under concurrent
+writes, unlike `cp foi.db` which can capture a torn transaction.
+
+Take a snapshot:
+
+```
+python backup.py foi.db backups 14
+```
+
+- Writes `backups/foi-<UTC-timestamp>.db` and a matching
+  `.manifest.json` (sha256, size, per-table row counts).
+- Prunes to the newest 14 snapshots. Pass a different number to change
+  retention, or 0 to disable pruning.
+
+Schedule it. Simplest option — a cron entry running every hour:
+
+```
+0 * * * * cd /path/to/foi-tracker && /usr/bin/python3 backup.py foi.db backups 168 >> backups/backup.log 2>&1
+```
+
+**Off-machine copy is your responsibility.** Point `rsync`, an S3
+sync, or your approved transport at the `backups/` directory. A
+snapshot on the same disk as the source is not a backup.
+
+### Restore drill
+
+```
+python restore.py backups/foi-<timestamp>.db foi.db
+```
+
+- Refuses to overwrite `foi.db` if the backup lacks a `requests`
+  table (a corrupt or wrong-file mistake).
+- Copies the current `foi.db` aside as
+  `foi.db.pre-restore-<UTC-timestamp>` before overwriting, so a
+  botched restore is reversible.
+- Uses a `.restore-tmp` intermediate + rename, so a concurrently
+  running app never reads a half-copied file.
+
+Run the drill at least monthly. A backup no-one has restored is a
+hypothesis.
+
 ## Notes
 
 - Deadlines are 20 working days from receipt (weekends excluded).

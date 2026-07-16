@@ -6,3 +6,6 @@ foi.db
 .venv/
 venv/
 .env
+backups/
+*.pre-restore-*
+*.restore-tmp

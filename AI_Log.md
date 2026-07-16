@@ -480,3 +480,102 @@ visible. Non-admin session (caseworker) receives 403.
   currently *slows* it down.
 
 ---
+
+## 2026-07-16 — Backups with SQLite online API + proven restore drill
+
+**Goal:** backups and proven restore next.
+
+**Files:**
+- `backup.py` (new — CLI + `backup_db` library function)
+- `restore.py` (new — CLI + `restore_db` + `verify_backup`)
+- `tests/test_backup.py` (new — 10 tests including a full round-trip)
+- `.gitignore` (adds `backups/`, `*.pre-restore-*`, `*.restore-tmp`)
+- `README.md` (backup + restore runbook + cron example)
+- `CLAUDE.md` (defect list re-scored; recoverability now covered)
+
+**Rationale:** The brief's fourth ICO audit axis is recoverability,
+and its concrete probe is Q4 — "Gary's machine dies on a Wednesday.
+Walk through the recovery, step by step, with the current setup and
+with yours." The inherited answer is "a USB stick, on Fridays,
+usually". The new answer is: hourly online-backup snapshots with
+manifests, a restore that refuses to overwrite with a broken file,
+a pre-restore safety copy so a bad restore is reversible, and a test
+suite that runs the whole drill on every push.
+
+**Design choices:**
+- **SQLite online-backup API** (`conn.backup(target)`), not a file
+  copy. A raw copy of `foi.db` during a write can produce a torn
+  file. The online API pages through the source under a shared lock
+  and yields a consistent snapshot even under concurrent writes.
+  A dedicated test opens a live connection to the source while a
+  backup runs, then reads the snapshot, to lock this behaviour in.
+- **Manifest beside every snapshot**. `foi-<ts>.manifest.json` holds
+  `created_at`, `source_path`, `backup_path`, `sha256`, `size_bytes`
+  and per-table row counts. The auditor sees at a glance that the
+  backup covered `requests`, `users`, `audit_events`, and the sha256
+  proves nothing has been tampered with post-hoc.
+- **Microsecond-resolution timestamps** in filenames
+  (`%Y%m%dT%H%M%S%fZ`) so back-to-back calls never collide. Sortable
+  by name; matches `ls -t` order.
+- **Keep-N pruning** driven by filename sort, default 14. Zero
+  disables. Manifest deleted together with its `.db`.
+- **`restore.py` verifies the backup before touching prod.** Refuses
+  to proceed if the file cannot open or lacks a `requests` table.
+  Then, if the target already exists, it is copied aside as
+  `foi.db.pre-restore-<UTC>` — botched restore is undoable.
+  The final write goes through a `.restore-tmp` + atomic rename
+  so a running app never reads a half-copied file.
+- **Off-machine transport is out of scope.** Documented explicitly:
+  point `rsync` / `aws s3 sync` at `backups/`. Baking a specific
+  transport into the tool would fight whatever DfT's approved
+  method is.
+- `_now` seam on `backup_db` lets tests use deterministic labels
+  instead of `time.sleep(1)` for prune tests.
+
+**Test coverage (`tests/test_backup.py`, 10 tests):**
+- Snapshot + manifest present, sha256 length correct, table counts
+  include `requests`, `users`, `audit_events`.
+- Prune keeps only N. Five backups with `keep=3` leaves three;
+  manifests pruned in lockstep.
+- Missing source → `FileNotFoundError`.
+- **Round-trip drill:** seed → backup → mutate (add row) → restore
+  → assert row count returns to seeded value and the safety copy
+  holds the mutation.
+- Backup missing `requests` table → `ValueError`; existing prod DB
+  untouched by size.
+- Pre-restore safety copy exists and contains the pre-restore state.
+- Online-backup API works with a source connection held open
+  concurrently.
+- `verify_backup` on a missing file raises.
+- Restore to a target that does not yet exist returns `safety=None`
+  and creates the file.
+- Manifest sha256 matches an independent hash of the snapshot file.
+
+**Verification:**
+- `python3 -m pytest tests/` → 60 passed
+  (10 deadline + 6 injection + 6 config + 15 auth + 13 audit + 10 backup).
+- **Live drill against real `foi.db`:**
+  - `python3 backup.py foi.db backups 5` produced
+    `foi-20260716T222958532582Z.db` (32 KB) with matching manifest
+    (sha256 present, `requests=13`, `users=1`, `audit_events=1`).
+  - Inserted a `FOI-DRILL` row into live DB — count 13 → 14.
+  - `python3 restore.py backups/foi-<ts>.db foi.db` — count 14 → 13,
+    `FOI-DRILL` row gone, `foi.db.pre-restore-<ts>` safety copy
+    exists on disk.
+
+**Answer to brief Q4 (Gary's Wednesday):**
+- Before: "we hope Gary's Friday USB copy is on Gary's other machine".
+- After: hourly manifested snapshots in `backups/` synced off-host
+  by cron; the restore is one command with an automatic pre-restore
+  safety copy; the drill is in CI so a broken restore path is caught
+  before Gary needs it.
+
+**Follow-ups (next):**
+- Rate limit `/login`.
+- Team-based data separation on `requests`.
+- CI pipeline (tests + security scan + deploy) — brief's fifth
+  direction. Now warranted; 60 tests worth of guardrails.
+- UK GDPR retention policy on requester PII (data-protection axis
+  is only half-covered — audit log exists, retention rule does not).
+
+---

@@ -21,6 +21,7 @@ Fixed:
 - ~~No authentication, no per-user identity.~~ Fixed: session-based auth (`auth.py`, `users.py`); passwords hashed with Werkzeug PBKDF2; every route behind `@login_required`; CSRF on all state-changing requests; session id rotated on login; disabled-user flag honoured; 15 auth tests. Users created via `python create_user.py EMAIL ROLE TEAM`.
 - ~~No audit log.~~ Fixed: append-only `audit_events` table (`audit.py`) records login success/failure, logout, request create/update. Each row: actor id + email, action, target, before/after JSON snapshots, IP, user agent, UTC timestamp. Admin-only `/audit` viewer. 13 audit tests including no-password-leak guard.
 - ~~No RBAC.~~ Partial: `admin_required` decorator gates `/audit`. Role column consulted at request time.
+- ~~`foi.db` backup = Gary's USB stick, Fridays, "usually".~~ Fixed: `backup.py` uses SQLite online-backup API (safe under concurrent writes), writes a manifest (sha256, size, table counts) beside each snapshot, prunes to keep-N. `restore.py` verifies the backup before overwriting and keeps a pre-restore safety copy. 10 backup/restore tests including a full round-trip drill. Off-machine copy is left to `rsync` / S3 sync by design.
 
 Still open:
 - No team-based data separation on requests (`team` on users, not yet joined against a `team` column on requests).
