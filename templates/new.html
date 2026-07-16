@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+  <h2>Log a new request</h2>
+  <form method="post">
+    <label for="ref">Reference</label>
+    <input type="text" id="ref" name="ref" placeholder="e.g. FOI-2026-0187" required>
+
+    <label for="requester">Requester name</label>
+    <input type="text" id="requester" name="requester" required>
+
+    <label for="subject">Subject of request</label>
+    <input type="text" id="subject" name="subject" required>
+
+    <label for="received">Date received</label>
+    <input type="date" id="received" name="received" value="{{ today }}" required>
+
+    <button type="submit">Save</button>
+  </form>
+{% endblock %}

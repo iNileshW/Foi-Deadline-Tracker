@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+  <h2>{{ r.ref }} — {{ r.subject }}</h2>
+  <table>
+    <tr><th>Requester</th><td>{{ r.requester }}</td></tr>
+    <tr><th>Received</th><td>{{ r.received }}</td></tr>
+    <tr><th>Deadline</th><td>{{ r.deadline }} {% if r.deadline < today and r.status != 'Responded' %}<strong>(OVERDUE)</strong>{% endif %}</td></tr>
+    <tr><th>Status</th><td>{{ r.status }}</td></tr>
+  </table>
+
+  <h3>Update</h3>
+  <form method="post">
+    <label for="status">Status</label>
+    <select id="status" name="status">
+      {% for s in statuses %}
+        <option value="{{ s }}" {% if s == r.status %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="4">{{ r.notes or '' }}</textarea>
+
+    <button type="submit">Save changes</button>
+  </form>
+{% endblock %}

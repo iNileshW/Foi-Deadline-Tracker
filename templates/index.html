@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+  <p>
+    <a href="/new">+ Log a new request</a>
+  </p>
+  <form method="get" action="/">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search subject or requester">
+    <button type="submit">Search</button>
+  </form>
+  <p class="hint">{{ rows|length }} request(s). Deadline = 20 working days from receipt.</p>
+  <table>
+    <tr><th>Ref</th><th>Subject</th><th>Requester</th><th>Received</th><th>Deadline</th><th>Status</th></tr>
+    {% for r in rows %}
+    <tr class="{% if r.deadline < today and r.status != 'Responded' %}overdue{% endif %}">
+      <td><a href="/request/{{ r.id }}">{{ r.ref }}</a></td>
+      <td>{{ r.subject }}</td>
+      <td>{{ r.requester }}</td>
+      <td>{{ r.received }}</td>
+      <td>{{ r.deadline }}</td>
+      <td><span class="status">{{ r.status }}</span></td>
+    </tr>
+    {% endfor %}
+  </table>
+{% endblock %}
