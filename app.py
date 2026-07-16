@@ -6,9 +6,27 @@ import secrets
 import sqlite3
 from datetime import date, datetime
 
-from flask import Flask, redirect, render_template, request
+from flask import (
+    Flask,
+    flash,
+    g,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 
+from auth import (
+    current_user,
+    get_csrf_token,
+    login_required,
+    login_user,
+    logout_user,
+    verify_csrf,
+)
 from deadlines import calculate_deadline
+from users import authenticate, get_user_by_id, init_users_table
 
 
 def _load_secret_key() -> str:
@@ -33,6 +51,11 @@ def _load_secret_key() -> str:
 
 app = Flask(__name__)
 app.secret_key = _load_secret_key()
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("FOI_SECURE_COOKIES", "0") == "1",
+)
 
 DB = os.environ.get("FOI_DB", "foi.db")
 
@@ -42,10 +65,61 @@ STATUSES = ["Received", "In progress", "Internal review", "Responded", "Overdue"
 def get_db():
     conn = sqlite3.connect(DB)
     conn.row_factory = sqlite3.Row
+    # Idempotent: ensures pre-auth databases pick up the users table.
+    # `CREATE TABLE IF NOT EXISTS` — safe on every connection.
+    init_users_table(conn)
     return conn
 
 
+def _load_user(user_id):
+    if user_id is None:
+        return None
+    return get_user_by_id(get_db(), user_id)
+
+
+@app.before_request
+def _csrf_guard():
+    # Verify CSRF on every state-changing request, including /login.
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        verify_csrf()
+
+
+@app.context_processor
+def _template_context():
+    return {
+        "csrf_token": get_csrf_token,
+        "current_user": current_user(_load_user),
+    }
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        email = request.form.get("email", "")
+        password = request.form.get("password", "")
+        user = authenticate(get_db(), email, password)
+        if user is None:
+            flash("Invalid email or password.", "error")
+            return render_template("login.html"), 401
+        login_user(user.id)
+        next_url = request.args.get("next") or url_for("index")
+        # Only allow relative redirects.
+        if not next_url.startswith("/"):
+            next_url = url_for("index")
+        return redirect(next_url)
+    # Ensure a CSRF token exists for the GET form.
+    get_csrf_token()
+    return render_template("login.html")
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    logout_user()
+    return redirect(url_for("login"))
+
+
 @app.route("/")
+@login_required
 def index():
     db = get_db()
     q = request.args.get("q", "")
@@ -65,6 +139,7 @@ def index():
 
 
 @app.route("/new", methods=["GET", "POST"])
+@login_required
 def new():
     if request.method == "POST":
         ref = request.form["ref"]
@@ -87,6 +162,7 @@ def new():
 
 
 @app.route("/request/<int:req_id>", methods=["GET", "POST"])
+@login_required
 def detail(req_id):
     db = get_db()
 

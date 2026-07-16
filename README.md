@@ -15,6 +15,7 @@ his desk. If it's down, ask Gary to turn his machine back on.
 ```
 pip install -r requirements.txt
 python seed.py       # creates foi.db with sample data (wipes existing data!)
+python create_user.py alice@example.gov.uk caseworker central  # prompts for password
 
 # Production: set a real secret.
 export FOI_SECRET_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')
@@ -24,6 +25,8 @@ export FOI_SECRET_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))'
 
 python app.py
 ```
+
+Sign in at http://localhost:5002/login with the account you just created.
 
 Then open http://localhost:5002
 
@@ -36,6 +39,7 @@ Then open http://localhost:5002
 | `FLASK_DEBUG` | Set to `1` to enable Werkzeug debugger. Do not enable in production. | `0` |
 | `FOI_DB` | Path to the SQLite database file. | `foi.db` |
 | `PORT` | HTTP port. | `5002` |
+| `FOI_SECURE_COOKIES` | Set to `1` to mark the session cookie `Secure` (HTTPS-only). Enable in production. | `0` |
 
 See `.env.example`.
 

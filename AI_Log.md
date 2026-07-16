@@ -219,3 +219,146 @@ passed while either of these ships.
 - Pin dependencies in `requirements.txt`.
 
 ---
+
+## 2026-07-16 — Push config-hardening commit to GitHub
+
+**Goal:** commit changes to repo.
+
+**Files pushed:**
+- 4 modified: `AI_Log.md`, `CLAUDE.md`, `README.md`, `app.py`
+- 3 new: `.env.example`, `tests/conftest.py`, `tests/test_config.py`
+
+**Commit:** `780a009` on `main`, fast-forward from `01fb753`.
+**Push:** `git push origin main` → `01fb753..780a009  main -> main`.
+
+---
+
+## 2026-07-16 — Add session authentication and CSRF protection
+
+**Goal:** add authentication next.
+
+**Files:**
+- `users.py` (new — `User` dataclass, password hashing, `authenticate`)
+- `auth.py` (new — `login_required`, session helpers, CSRF)
+- `app.py` (login/logout routes; `@login_required` on all existing
+  routes; CSRF `before_request`; hardened session cookies)
+- `create_user.py` (new — CLI to add users, password read from stdin)
+- `seed.py` (calls `init_users_table`; no seeded users)
+- `templates/base.html` (top-bar user + sign-out button)
+- `templates/login.html` (new)
+- `templates/new.html`, `templates/detail.html` (hidden CSRF field)
+- `tests/test_sql_injection.py` (fixture now creates a logged-in
+  session and adds `_csrf` to POST bodies)
+- `tests/test_auth.py` (new — 15 tests)
+- `README.md`, `CLAUDE.md` updated
+
+**Rationale:** Two directorates joining means multi-team, real users,
+and personal data. The ICO auditor will ask *who* accessed a record —
+that question is unanswerable without identities. Auth is the
+prerequisite for the audit log that comes next.
+
+**Design choices:**
+- Handrolled session auth on top of Flask's signed cookie session,
+  no `flask-login` / `flask-wtf` dependencies. Fewer moving parts;
+  no new install steps for the hackathon environment.
+- Password hashing via `werkzeug.security.generate_password_hash`
+  (already in the Flask dep tree). PBKDF2 by default; upgrade-in-place
+  possible without a schema change because Werkzeug encodes the
+  algorithm in the stored string.
+- Password minimum length: 12 characters. Enforced in `create_user`,
+  covered by a test.
+- CSRF: per-session token in `session["csrf_token"]`, submitted as
+  hidden `_csrf` form field, verified in `before_request` for all
+  mutating verbs (including `/login` and `/logout`). Constant-time
+  compare via `secrets.compare_digest`.
+- Session cookie hardening: `HTTPOnly` always on, `SameSite=Lax`,
+  `Secure` behind the `FOI_SECURE_COOKIES=1` env var so production
+  can opt in without breaking `http://localhost` dev.
+- Session rotation on login (`session.clear()` before setting
+  `user_id`) to defeat session-fixation attacks.
+- `?next=` open-redirect guard: only relative URLs starting with `/`
+  are honoured; anything else falls back to `/`.
+- Login failure returns HTTP 401 with a generic "Invalid email or
+  password." message — no distinction between "unknown email",
+  "wrong password", or "account disabled". Prevents user enumeration.
+- No RBAC yet. Role and team live on `users` but no route consults
+  them. Flagged as follow-up in CLAUDE.md.
+
+**Test coverage (`tests/test_auth.py`, 15 tests):**
+- Three unauthenticated routes redirect to `/login`.
+- Wrong password → 401; unknown email → 401 (same status; enumeration
+  guard).
+- Successful login → 302; protected route now returns 200.
+- Logout clears session; protected route redirects afterwards.
+- CSRF: POST without token → 400; POST with wrong token → 400.
+- Password not stored plaintext; stored hash starts with a known
+  algorithm prefix.
+- Disabled user (via `disabled_at` timestamp) cannot log in.
+- `?next=https://evil.example.com/...` is ignored; redirect stays
+  on-site.
+- `create_user` refuses passwords shorter than 12 chars and unknown
+  roles.
+- Session id is rotated on login (pre-login session keys wiped).
+
+**Existing tests updated:** `tests/test_sql_injection.py` fixture now
+initialises the `users` table, opens a `session_transaction`, sets
+`user_id` and a known `csrf_token`, and each POST test includes the
+matching `_csrf` field. No behavioural regressions; all six original
+injection tests still pass.
+
+**Verification:** `python3 -m pytest tests/` → 37 passed, no warnings
+(10 deadline + 6 injection + 6 config + 15 auth).
+
+**Deprecation cleanup:** `users.py` uses `datetime.now(timezone.utc)`
+instead of `datetime.utcnow()` to silence a Python 3.13
+DeprecationWarning.
+
+**Follow-ups (next):**
+- Audit log: `record_changes(user_id, request_id, before, after,
+  timestamp)`. Populate on POST /new and POST /request/<id>.
+- RBAC: gate destructive edits or admin-only routes on `role`.
+- Team-based data separation: add `team` to `requests`, filter
+  index/detail queries by `current_user.team` for non-admins.
+- Rate limiting / lockout on `/login`.
+- Kill the destructive `seed.py`.
+
+---
+
+## 2026-07-16 — Hotfix: auto-create users table on legacy databases
+
+**Goal:** browser reported HTTP 500 on POST /login.
+
+**Symptom:** `sqlite3.OperationalError: no such table: users`.
+
+**Root cause:** the existing `foi.db` in the working tree was
+pre-auth — created before the users table existed. `seed.py` now
+creates the table, but users who did not re-seed (correct: seed is
+destructive of `requests`) still had the old schema. The auth code
+paths blew up on the first `SELECT ... FROM users` in `authenticate`.
+
+**Fix:** call `init_users_table(conn)` inside `app.get_db()` on every
+connection. It's a `CREATE TABLE IF NOT EXISTS`, so it's idempotent
+and cheap. Pre-auth databases pick up the users table transparently
+the first time they hit any DB-backed route; already-migrated
+databases are unaffected.
+
+**Files:**
+- `app.py` (`get_db` now calls `init_users_table`)
+
+**Verification:**
+- Full test suite still green: 37/37.
+- Live reproduction with a fresh `foi.db` lacking the users table:
+  - GET `/` → 302 to `/login`.
+  - GET `/login` → 200, CSRF token issued.
+  - POST `/login` (unknown user) → 401 (was 500).
+  - The `users` table now exists in the database after the POST.
+- Seeded `admin@dft.gov.uk` (role=admin, team=central) manually via
+  `python3 -c "…create_user…"` to give the user a working local login.
+  In production, `create_user.py EMAIL ROLE TEAM` is the intended path.
+
+**Note on the earlier 500 during verification:** a Werkzeug dev server
+from a previous run was still holding port 5002 after `kill` in an
+earlier bash invocation. A fresh `fuser -k 5002/tcp` cleared it and
+subsequent runs behaved correctly.
+
+---

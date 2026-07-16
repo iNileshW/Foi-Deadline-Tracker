@@ -16,13 +16,31 @@
     .status { display: inline-block; background: #f3f2f1; border: 1px solid #b1b4b6; padding: 1px 8px; font-size: .85rem; }
     form.inline { display: inline; }
     label { display: block; margin: .8rem 0 .2rem; font-weight: bold; }
-    input[type=text], input[type=date], select, textarea { padding: .5rem; border: 2px solid #0b0c0c; font-size: 1rem; width: 100%; max-width: 420px; box-sizing: border-box; }
+    input[type=text], input[type=password], input[type=date], select, textarea { padding: .5rem; border: 2px solid #0b0c0c; font-size: 1rem; width: 100%; max-width: 420px; box-sizing: border-box; }
     button { background: #00703c; color: #fff; border: 0; padding: .6rem 1.2rem; font-size: 1rem; cursor: pointer; margin-top: 1rem; }
     .hint { color: #505a5f; font-size: .85rem; }
+    .topbar { display: flex; justify-content: space-between; align-items: baseline; }
+    .topbar .user { font-size: .9rem; color: #505a5f; }
+    .topbar form { display: inline; margin: 0; }
+    .topbar button.link { background: none; color: #1d70b8; border: 0; padding: 0; margin: 0; font-size: .9rem; cursor: pointer; text-decoration: underline; }
+    .flash { padding: .5rem .8rem; border-left: 4px solid #d4351c; background: #fbeaea; }
+    .flash-error { border-color: #d4351c; background: #fbeaea; }
   </style>
 </head>
 <body>
-  <h1><a href="/">FOI Deadline Tracker</a></h1>
+  <div class="topbar">
+    <h1><a href="/">FOI Deadline Tracker</a></h1>
+    {% if current_user %}
+    <div class="user">
+      Signed in as <strong>{{ current_user.email }}</strong> ({{ current_user.team }})
+      &middot;
+      <form method="post" action="/logout">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button type="submit" class="link">Sign out</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
   {% block content %}{% endblock %}
 </body>
 </html>

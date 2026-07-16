@@ -10,6 +10,7 @@
 
   <h3>Update</h3>
   <form method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <label for="status">Status</label>
     <select id="status" name="status">
       {% for s in statuses %}

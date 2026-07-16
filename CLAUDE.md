@@ -18,23 +18,32 @@ Fixed:
 - ~~`deadlines.py:calculate_deadline` — weekends only, no bank holidays.~~ Fixed: GOV.UK feed cached to `bank_holidays.json`; 10 tests cover Easter, Christmas, day-zero rule.
 - ~~SQL injection in `/`, `/new`, `/request/<id>`.~~ Fixed: all queries parameterised; 6 injection regression tests.
 - ~~`secret_key = "dev"`, `debug=True` hardcoded.~~ Fixed: `FOI_SECRET_KEY` required from env; app refuses to start without it (dev flag `FOI_ALLOW_INSECURE_DEV_SECRET=1` for local only). Debug off by default; `FLASK_DEBUG=1` opts in.
+- ~~No authentication, no per-user identity.~~ Fixed: session-based auth (`auth.py`, `users.py`); passwords hashed with Werkzeug PBKDF2; every route behind `@login_required`; CSRF on all state-changing requests; session id rotated on login; disabled-user flag honoured; 15 auth tests. Users created via `python create_user.py EMAIL ROLE TEAM`.
 
 Still open:
-- No authentication. No RBAC. No per-user identity.
-- No audit log. Cannot answer "who changed this record and when".
+- No audit log. Cannot answer "who changed this record and when". `current_user` is available on every request but not yet written into a change log.
+- No RBAC beyond schema (`role` column exists; enforcement not yet wired to routes).
+- No team-based data separation on requests (`team` on users, not yet joined against a `team` column on requests).
 - `seed.py:10-11` — deletes `foi.db` unconditionally on run. Destructive.
 - `foi.db` lives next to code. Backup = Gary's USB stick, Fridays, "usually".
 - No CI. No container.
 - `requirements.txt` — unpinned `flask` only.
+- No rate limiting on `/login`. Brute-force protection is on the to-do list.
 
 ## Architecture
 
-- `app.py` — Flask app, port 5002, routes: `/`, `/new`, `/request/<id>`.
-- `deadlines.py` — `calculate_deadline(received: date) -> date`, 20 working days.
-- `seed.py` — recreates `foi.db` with sample rows.
-- `templates/` — `base.html`, `index.html`, `new.html`, `detail.html`.
-- `foi.db` — SQLite, single table `requests(id, ref, requester, subject, received, deadline, status, notes)`.
+- `app.py` — Flask app, port 5002. Routes: `/`, `/new`, `/request/<id>`, `/login`, `/logout` (POST). Global `before_request` verifies CSRF on all state-changing requests.
+- `auth.py` — `login_required`, `login_user` (rotates session), `logout_user`, CSRF token helpers.
+- `users.py` — `User` dataclass, `init_users_table`, `create_user`, `authenticate`, `get_user_by_id`. Passwords hashed with Werkzeug PBKDF2.
+- `deadlines.py` — `calculate_deadline(received: date) -> date`, 20 working days, holiday-aware.
+- `seed.py` — recreates `foi.db` with sample rows and the users table.
+- `create_user.py` — CLI to add users (password read from terminal).
+- `templates/` — `base.html`, `index.html`, `new.html`, `detail.html`, `login.html`.
+- `foi.db` — SQLite. Tables:
+  - `requests(id, ref, requester, subject, received, deadline, status, notes)`
+  - `users(id, email UNIQUE, password_hash, role, team, created_at, disabled_at)`
 - Statuses: `Received`, `In progress`, `Internal review`, `Responded`, `Overdue`.
+- Roles: `admin`, `caseworker`.
 
 ## Run
 

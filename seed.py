@@ -6,6 +6,7 @@ import sqlite3
 from datetime import date, timedelta
 
 from deadlines import calculate_deadline
+from users import init_users_table
 
 if os.path.exists("foi.db"):
     os.remove("foi.db")
@@ -23,6 +24,7 @@ conn.execute("""
         notes TEXT
     )
 """)
+init_users_table(conn)
 
 SAMPLE = [
     ("FOI-2026-0141", "J. Whitfield", "Pothole repair spend by borough, 2024-2026", 38, "Responded"),
@@ -51,3 +53,4 @@ for ref, requester, subject, days_ago, status in SAMPLE:
 conn.commit()
 conn.close()
 print(f"Seeded foi.db with {len(SAMPLE)} requests")
+print("No users created. Add one with: python create_user.py EMAIL ROLE TEAM")

@@ -2,6 +2,7 @@
 {% block content %}
   <h2>Log a new request</h2>
   <form method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <label for="ref">Reference</label>
     <input type="text" id="ref" name="ref" placeholder="e.g. FOI-2026-0187" required>
 

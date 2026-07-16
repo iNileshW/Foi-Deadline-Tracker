@@ -10,6 +10,9 @@ import sqlite3
 import pytest
 
 import app as app_module
+from users import init_users_table
+
+CSRF = "test-csrf-token"
 
 
 @pytest.fixture
@@ -39,12 +42,17 @@ def client(tmp_path, monkeypatch):
             "",
         ),
     )
+    init_users_table(conn)
     conn.commit()
     conn.close()
 
     monkeypatch.setattr(app_module, "DB", str(db_path))
     app_module.app.config["TESTING"] = True
     with app_module.app.test_client() as c:
+        # Simulate a logged-in session for the routes under test.
+        with c.session_transaction() as s:
+            s["user_id"] = 1
+            s["csrf_token"] = CSRF
         yield c, db_path
 
 
@@ -60,13 +68,10 @@ def test_search_drop_table_neutralised(client):
     c, db_path = client
     r = c.get("/", query_string={"q": "'; DROP TABLE requests; --"})
     assert r.status_code == 200
-    # Table must still exist and still hold the seeded row.
     assert _row_count(db_path) == 1
 
 
 def test_search_union_leak_neutralised(client):
-    """A UNION SELECT payload against the LIKE clause must not surface
-    schema or any row not matching the literal string."""
     c, _ = client
     payload = "%' UNION SELECT sql,sql,sql,sql,sql,sql,sql,sql FROM sqlite_master --"
     r = c.get("/", query_string={"q": payload})
@@ -76,8 +81,6 @@ def test_search_union_leak_neutralised(client):
 
 
 def test_search_literal_apostrophe_is_safe(client):
-    """A lone apostrophe in the search box used to crash the query.
-    It must now return a valid (empty) result set."""
     c, _ = client
     r = c.get("/", query_string={"q": "O'Brien"})
     assert r.status_code == 200
@@ -88,6 +91,7 @@ def test_new_request_persists_apostrophes(client):
     r = c.post(
         "/new",
         data={
+            "_csrf": CSRF,
             "ref": "FOI-TEST-2",
             "requester": "O'Brien",
             "subject": "Roads with 'apostrophes' and ; semicolons",
@@ -112,7 +116,7 @@ def test_detail_update_preserves_hostile_notes(client):
     hostile = "Note with 'quotes'; DROP TABLE requests; --"
     r = c.post(
         "/request/1",
-        data={"status": "In progress", "notes": hostile},
+        data={"_csrf": CSRF, "status": "In progress", "notes": hostile},
         follow_redirects=False,
     )
     assert r.status_code == 302
@@ -123,12 +127,10 @@ def test_detail_update_preserves_hostile_notes(client):
     conn.close()
     assert row[0] == hostile
     assert row[1] == "In progress"
-    # And the table itself is still intact.
     assert _row_count(db_path) == 1
 
 
 def test_detail_route_rejects_non_integer_id(client):
-    """The `<int:req_id>` converter blocks path-based injection outright."""
     c, _ = client
     r = c.get("/request/1;DROP")
     assert r.status_code == 404
