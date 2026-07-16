@@ -1061,3 +1061,44 @@ identical across rebuilds, which the ICO auditor cares about for
 - Backfill `team` on the seeded demo rows.
 
 ---
+
+## 2026-07-17 — Backfill team on seed data
+
+**Goal:** backfill team on seed data.
+
+**Files:**
+- `seed.py` (sample tuples now carry a `team`; INSERT writes it)
+
+**Rationale:** With team scoping shipped, fresh installs would still
+create 12 sample rows on `team=''` (unassigned). The unassigned
+policy is a *migration* affordance — for a fresh install it just
+hides the multi-directorate story we want to show. Assigning teams
+to seed data makes the demo concrete: log in as `alice@rail.gov.uk`
+and see only the two rail requests; log in as an admin and see all
+twelve.
+
+**Team distribution (12 rows):**
+- **roads (5):** pothole spend, smart motorway, Lower Thames Crossing,
+  EV charging, A38 bridge inspection.
+- **central (5):** active travel, airline lobbyists, driving test
+  backlog, pavement parking, taxi spend.
+- **rail (2):** rail electrification feasibility, bus improvement
+  plan funding formula.
+
+**Live backfill:** the existing local `foi.db` had rows on `team=''`
+because it pre-dates the team column. One-off `UPDATE requests SET
+team = ? WHERE ref = ?` mapping applied so the demo works without a
+destructive `python seed.py`. Row counts after backfill:
+`central=5`, `roads=5`, `rail=2`, `(unassigned)=1` (a `FOI-CURL-TEST`
+row inserted during an earlier auth verification is intentionally
+left unassigned so the "legacy row visible to all" path is
+demonstrable).
+
+**Verification:** `python3 -m pytest tests/` → 103 passed.
+
+**Follow-ups (next):**
+- Kill destructive `seed.py` (still deletes `foi.db` unconditionally).
+- CLI story for admins to reassign a request's team via the web UI
+  (currently only via SQL).
+
+---
