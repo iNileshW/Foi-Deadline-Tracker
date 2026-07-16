@@ -12,17 +12,19 @@ Flask CRUD app tracking Freedom of Information requests for DfT central FOI team
 
 Pass an ICO auditor asking about: **deadline accuracy, data protection, access control, recoverability**. Prioritise the gap that matters most; defend the call.
 
-## Known Defects (as inherited)
+## Known Defects
 
-- `deadlines.py:calculate_deadline` — skips Sat/Sun only. Bank holidays not handled. Root cause of statutory breach. **Highest-value fix.**
-- `app.py:32-35, 54-58, 72-74, 78` — SQL built by f-string interpolation of user input. Injection open in search, insert, update, detail lookup.
-- `app.py:13` — `secret_key = "dev"`. Committed dev secret.
-- `app.py:84` — `debug=True`. Werkzeug debugger + PIN over network.
+Fixed:
+- ~~`deadlines.py:calculate_deadline` — weekends only, no bank holidays.~~ Fixed: GOV.UK feed cached to `bank_holidays.json`; 10 tests cover Easter, Christmas, day-zero rule.
+- ~~SQL injection in `/`, `/new`, `/request/<id>`.~~ Fixed: all queries parameterised; 6 injection regression tests.
+- ~~`secret_key = "dev"`, `debug=True` hardcoded.~~ Fixed: `FOI_SECRET_KEY` required from env; app refuses to start without it (dev flag `FOI_ALLOW_INSECURE_DEV_SECRET=1` for local only). Debug off by default; `FLASK_DEBUG=1` opts in.
+
+Still open:
 - No authentication. No RBAC. No per-user identity.
 - No audit log. Cannot answer "who changed this record and when".
 - `seed.py:10-11` — deletes `foi.db` unconditionally on run. Destructive.
 - `foi.db` lives next to code. Backup = Gary's USB stick, Fridays, "usually".
-- Zero tests. Zero CI. Zero container. Zero secret management.
+- No CI. No container.
 - `requirements.txt` — unpinned `flask` only.
 
 ## Architecture

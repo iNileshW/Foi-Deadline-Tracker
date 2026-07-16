@@ -1,6 +1,8 @@
 # FOI Deadline Tracker
 # Tracks Freedom of Information requests and their statutory deadlines.
 
+import os
+import secrets
 import sqlite3
 from datetime import date, datetime
 
@@ -8,10 +10,31 @@ from flask import Flask, redirect, render_template, request
 
 from deadlines import calculate_deadline
 
-app = Flask(__name__)
-app.secret_key = "dev"  # TODO: replace with env-sourced secret
 
-DB = "foi.db"
+def _load_secret_key() -> str:
+    """Return a Flask session secret.
+
+    Production: `FOI_SECRET_KEY` must be set. Generate one with
+        python -c 'import secrets; print(secrets.token_hex(32))'
+    Local development only: `FOI_ALLOW_INSECURE_DEV_SECRET=1` swaps in
+    a per-process random secret. Sessions do not survive a restart.
+    """
+    secret = os.environ.get("FOI_SECRET_KEY")
+    if secret:
+        return secret
+    if os.environ.get("FOI_ALLOW_INSECURE_DEV_SECRET") == "1":
+        return secrets.token_hex(32)
+    raise RuntimeError(
+        "FOI_SECRET_KEY is required. "
+        "Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'. "
+        "For local development only, set FOI_ALLOW_INSECURE_DEV_SECRET=1."
+    )
+
+
+app = Flask(__name__)
+app.secret_key = _load_secret_key()
+
+DB = os.environ.get("FOI_DB", "foi.db")
 
 STATUSES = ["Received", "In progress", "Internal review", "Responded", "Overdue"]
 
@@ -85,4 +108,6 @@ def detail(req_id):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5002)
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    port = int(os.environ.get("PORT", "5002"))
+    app.run(debug=debug, port=port)
