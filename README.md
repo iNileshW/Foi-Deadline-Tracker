@@ -1,6 +1,8 @@
 # FOI Deadline Tracker
 
-[![CI](https://github.com/iNileshW/Foi-Deadline-Tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/iNileshW/Foi-Deadline-Tracker/actions/workflows/ci.yml)
+[![CI](https://github.com/iNileshW/Foi-Deadline-Tracker/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/iNileshW/Foi-Deadline-Tracker/actions/workflows/ci.yml?query=branch%3Amain)
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)](https://github.com/iNileshW/Foi-Deadline-Tracker/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-112%20passed-brightgreen)](https://github.com/iNileshW/Foi-Deadline-Tracker/tree/main/tests)
 
 Tracks Freedom of Information requests for the DfT central FOI team and
 calculates the statutory 20-working-day response deadline.
