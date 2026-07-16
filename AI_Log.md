@@ -362,3 +362,23 @@ earlier bash invocation. A fresh `fuser -k 5002/tcp` cleared it and
 subsequent runs behaved correctly.
 
 ---
+
+## 2026-07-16 — Push auth + hotfix to GitHub
+
+**Goal:** log changes done with why in AI_Log.md & commit.
+
+**Commit:** `3671641` on `main`, fast-forward from `780a009`. 14 files
+changed, 747 insertions, 19 deletions.
+
+**Push:** `git push origin main` → `780a009..3671641  main -> main`.
+
+**Scope in one commit:** auth introduction (`auth.py`, `users.py`,
+`create_user.py`, `login.html`, all POST forms carry `_csrf`),
+`@login_required` on the three business routes, `before_request` CSRF
+guard, session cookie hardening, tests (auth + updated injection),
+plus the `get_db()` idempotent-schema hotfix. Bundled because the
+hotfix without the schema change would still break; the auth changes
+without the hotfix would break for anyone running against the
+inherited `foi.db`.
+
+---
