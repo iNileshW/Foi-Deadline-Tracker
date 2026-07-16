@@ -25,11 +25,12 @@ Fixed:
 
 - ~~No CI.~~ Fixed: `.github/workflows/ci.yml`. Three jobs — pytest across Python 3.11/3.12/3.13, bandit SAST + pip-audit on both requirements files, and a `main`-only tarball artifact. Deploy step deliberately not automated (no target env).
 
+- ~~No container.~~ Fixed: `Dockerfile` + `docker-compose.yml`. Runs under gunicorn (Flask dev server is not production-safe), non-root UID 10001, `/healthz` probe wired to `HEALTHCHECK`, data on a mounted volume so `docker compose down` doesn't destroy the DB. CI builds the image on every push.
+
 Still open:
 - No team-based data separation on requests (`team` on users, not yet joined against a `team` column on requests).
-- `seed.py:10-11` — deletes `foi.db` unconditionally on run. Destructive.
-- No container.
-- `requirements.txt` — unpinned `flask` only.
+- `seed.py:11` — deletes the DB file unconditionally on run. Destructive.
+- `requirements.txt` — unpinned (`flask`, `gunicorn`).
 - No rate limiting on `/login`. Brute-force protection is on the to-do list.
 - UK GDPR retention policy on requester name/address is undefined.
 

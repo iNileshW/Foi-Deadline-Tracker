@@ -265,6 +265,25 @@ def detail(req_id):
     return render_template("detail.html", r=row, statuses=STATUSES, today=today)
 
 
+@app.route("/healthz")
+def healthz():
+    """Liveness + readiness probe.
+
+    Verifies the DB opens and the schema-critical tables exist. If the
+    check succeeds the container is healthy; if it fails, Docker's
+    HEALTHCHECK marks the container unhealthy so the orchestrator can
+    restart or route around it.
+    """
+    try:
+        db = get_db()
+        db.execute("SELECT 1 FROM requests LIMIT 1")
+        db.execute("SELECT 1 FROM users LIMIT 1")
+        db.execute("SELECT 1 FROM audit_events LIMIT 1")
+    except Exception:
+        return {"status": "unhealthy"}, 503
+    return {"status": "ok"}, 200
+
+
 @app.route("/audit")
 @admin_required(_load_user)
 def audit_view():

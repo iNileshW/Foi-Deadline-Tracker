@@ -1,0 +1,17 @@
+.git
+.github
+__pycache__
+*.pyc
+.pytest_cache
+tests
+foi.db
+*.db
+backups
+*.pre-restore-*
+*.restore-tmp
+.env
+.venv
+venv
+AI_Log.md
+CLAUDE.md
+README.md

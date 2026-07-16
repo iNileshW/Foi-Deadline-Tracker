@@ -66,13 +66,43 @@ pip-audit --strict -r requirements-dev.txt
 
 ## CI
 
-Three jobs, GitHub Actions:
+Four jobs, GitHub Actions:
 
 - **Tests** — pytest across Python 3.11 / 3.12 / 3.13.
 - **Security scans** — bandit SAST and pip-audit on both requirements files.
+- **Docker build** — builds the image on every push and pull request so a
+  broken Dockerfile is caught before merge.
 - **Package** — on merges to `main`, uploads a timestamped tarball artifact
   (30-day retention). Deploy is deliberately not automated — no shared
   target environment yet.
+
+## Container
+
+```
+docker compose up --build
+```
+
+App on http://localhost:5002. Data persists in the `foi_data` volume so a
+`docker compose down && docker compose up` retains the database.
+
+First run — seed the DB and add a user:
+
+```
+docker compose exec foi python seed.py
+docker compose exec foi python create_user.py admin@dft.gov.uk admin central
+```
+
+Runtime notes:
+
+- Serves under **gunicorn**, not the Flask dev server. Two workers by
+  default; set `WEB_CONCURRENCY=N` in `.env` to scale.
+- Runs as a non-root user (UID 10001).
+- Health probe: `GET /healthz` — returns 200 when the DB opens and the
+  three schema-critical tables (`requests`, `users`, `audit_events`) are
+  present, 503 otherwise. Docker HEALTHCHECK polls it every 30 s.
+- `FOI_SECRET_KEY` must be set in production. Local development can use
+  `FOI_ALLOW_INSECURE_DEV_SECRET=1` (already default in `docker-compose.yml`
+  via env passthrough).
 
 ## Backup and restore
 

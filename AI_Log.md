@@ -647,3 +647,79 @@ built in the previous six changes.
 - Rate-limit `/login`; team-scoping; UK GDPR retention.
 
 ---
+
+## 2026-07-16 — Containerise: Dockerfile + compose + healthcheck
+
+**Goal:** container next.
+
+**Files:**
+- `Dockerfile` (new — python:3.13-slim, gunicorn, non-root UID 10001)
+- `docker-compose.yml` (new — one service, named volume for data)
+- `.dockerignore` (new — excludes .git, tests, foi.db, backups, docs)
+- `app.py` (new `/healthz` route)
+- `requirements.txt` (adds `gunicorn`)
+- `seed.py` (respects `FOI_DB` env var — previously hardcoded to
+  `foi.db`; would silently seed the wrong path inside the container)
+- `.github/workflows/ci.yml` (new `docker` job — builds the image on
+  every push and PR, with gha-cache)
+- `tests/test_healthz.py` (new — 3 tests)
+- `README.md` + `CLAUDE.md` updated
+
+**Rationale:** The Flask dev server carries a Werkzeug warning for a
+reason. Under any real load it's single-threaded and the debugger
+console is one misconfiguration away from RCE. A container-based
+deploy replaces "Gary's desktop" with something an ops team can
+schedule, restart, and probe.
+
+**Design choices:**
+- **Base image:** `python:3.13-slim`. Adds `curl` only (for the
+  in-container healthcheck), no compilers, no build tools.
+- **Non-root user:** fixed UID/GID 10001 so bind-mounted volumes
+  behave predictably on hosts that share the range.
+- **Gunicorn** (not the Flask dev server), `--workers 2` by default,
+  tunable with `WEB_CONCURRENCY`. Access + error logs to stdout so
+  a log driver can pick them up.
+- **Volume mount at `/data`:** the SQLite file lives there so it
+  survives container re-creates. `FOI_DB=/data/foi.db` set in the
+  image.
+- **`/healthz` route:** opens the DB and probes every schema-critical
+  table (`requests`, `users`, `audit_events`). Returns
+  `{"status": "ok"}` 200 when the schema is present, 503 otherwise.
+  Wired into `HEALTHCHECK` and the compose `healthcheck:` block.
+  Public, no auth — orchestrators must be able to probe.
+- **`seed.py` bug fix:** previously wrote to a relative `foi.db`.
+  Under the container, that's `/app/foi.db`, not `/data/foi.db`.
+  Now reads `FOI_DB` — the smoke test caught this before push.
+- **CI docker job:** `docker/setup-buildx-action` + `build-push-action`
+  with GHA layer cache. Build-only, no push. Catches Dockerfile
+  regressions on every PR.
+- **`.dockerignore`** excludes tests, docs, `.git`, `foi.db`, backups.
+  Image stays small; secrets and DB state never accidentally ship.
+
+**Verification (local):**
+- `docker build -t foi-tracker:local .` — builds clean.
+- `docker run` with `FOI_ALLOW_INSECURE_DEV_SECRET=1` and a named
+  volume: gunicorn starts, listens on 8080, 2 workers boot.
+- `GET /healthz` on an empty volume → 503 (schema missing). Correct.
+- `docker exec … python seed.py` writes `/data/foi.db` (env-driven
+  path); `/healthz` → 200 with `{"status":"ok"}`.
+- `docker exec … python create_user.py admin@dft.gov.uk admin central`
+  creates an admin.
+- Full login flow through the containerised app: POST /login → 302,
+  authed GET / → 200, 12 seeded rows rendered.
+- Container + volume cleaned up.
+- `python3 -m pytest tests/` → 63 passed (10 deadline + 6 injection +
+  6 config + 15 auth + 13 audit + 10 backup + 3 healthz).
+
+**Note on the podman HEALTHCHECK warning:** the local host has podman
+in Docker-compat mode. Podman's default OCI format ignores the
+Dockerfile `HEALTHCHECK` instruction (warning: *HEALTHCHECK is not
+supported for OCI image format*). The compose-level `healthcheck:`
+block still fires under podman. Under real Docker Engine both work.
+
+**Follow-ups (next):**
+- Pin `requirements.txt`.
+- Rate-limit `/login`.
+- Team-based data separation on requests.
+
+---

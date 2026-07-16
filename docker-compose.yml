@@ -1,0 +1,30 @@
+services:
+  foi:
+    build: .
+    image: foi-tracker:local
+    ports:
+      # Host port : container port. Change the left side to move the app.
+      - "5002:8080"
+    environment:
+      # Provide FOI_SECRET_KEY via `.env` or your shell for real
+      # deployments. FOI_ALLOW_INSECURE_DEV_SECRET is a local-only
+      # shortcut.
+      FOI_SECRET_KEY: "${FOI_SECRET_KEY:-}"
+      FOI_ALLOW_INSECURE_DEV_SECRET: "${FOI_ALLOW_INSECURE_DEV_SECRET:-}"
+      FOI_SECURE_COOKIES: "${FOI_SECURE_COOKIES:-0}"
+      PORT: "8080"
+      WEB_CONCURRENCY: "${WEB_CONCURRENCY:-2}"
+    volumes:
+      # Persist the SQLite DB and let backup/restore work across
+      # container recreates.
+      - foi_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  foi_data:

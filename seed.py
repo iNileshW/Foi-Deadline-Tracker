@@ -9,10 +9,12 @@ from audit import init_audit_table
 from deadlines import calculate_deadline
 from users import init_users_table
 
-if os.path.exists("foi.db"):
-    os.remove("foi.db")
+DB = os.environ.get("FOI_DB", "foi.db")
 
-conn = sqlite3.connect("foi.db")
+if os.path.exists(DB):
+    os.remove(DB)
+
+conn = sqlite3.connect(DB)
 conn.execute("""
     CREATE TABLE requests (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,5 +56,5 @@ for ref, requester, subject, days_ago, status in SAMPLE:
 
 conn.commit()
 conn.close()
-print(f"Seeded foi.db with {len(SAMPLE)} requests")
+print(f"Seeded {DB} with {len(SAMPLE)} requests")
 print("No users created. Add one with: python create_user.py EMAIL ROLE TEAM")
