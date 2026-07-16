@@ -19,7 +19,7 @@ from flask import (
     url_for,
 )
 
-from audit import init_audit_table, list_events, record_event
+from audit import list_events, record_event
 from auth import (
     admin_required,
     current_user,
@@ -31,7 +31,8 @@ from auth import (
 )
 from deadlines import calculate_deadline
 from ratelimit import is_locked, seconds_until_unlock
-from users import authenticate, get_user_by_id, init_users_table
+from schema import init_all
+from users import authenticate, get_user_by_id
 
 
 def _load_secret_key() -> str:
@@ -71,10 +72,18 @@ def get_db():
     conn = sqlite3.connect(DB)
     conn.row_factory = sqlite3.Row
     # Idempotent schema init: pre-existing databases pick up new tables
-    # without a destructive re-seed. `CREATE TABLE IF NOT EXISTS` is cheap.
-    init_users_table(conn)
-    init_audit_table(conn)
+    # and columns without a destructive re-seed.
+    init_all(conn)
     return conn
+
+
+def _team_scope_where(user, table_alias: str = ""):
+    """Return an (SQL fragment, params) tuple restricting a query to
+    the caller's team plus legacy-unassigned rows. Admins see all."""
+    col = f"{table_alias}.team" if table_alias else "team"
+    if user is None or user.role == "admin":
+        return "", []
+    return f" AND ({col} = ? OR {col} = '')", [user.team]
 
 
 def _load_user(user_id):
@@ -177,17 +186,19 @@ def logout():
 @login_required
 def index():
     db = get_db()
+    user = current_user(_load_user)
+    scope_sql, scope_params = _team_scope_where(user)
     q = request.args.get("q", "")
+    # `scope_sql` is a literal fragment built in _team_scope_where;
+    # values are parameter-bound.
+    base = "SELECT * FROM requests WHERE (subject LIKE ? OR requester LIKE ?)"  # nosec B608
+    base_all = "SELECT * FROM requests WHERE 1=1"  # nosec B608
+    order = " ORDER BY deadline"
     if q:
         like = f"%{q}%"
-        rows = db.execute(
-            "SELECT * FROM requests "
-            "WHERE subject LIKE ? OR requester LIKE ? "
-            "ORDER BY deadline",
-            (like, like),
-        ).fetchall()
+        rows = db.execute(base + scope_sql + order, (like, like, *scope_params)).fetchall()
     else:
-        rows = db.execute("SELECT * FROM requests ORDER BY deadline").fetchall()
+        rows = db.execute(base_all + scope_sql + order, scope_params).fetchall()
 
     today = date.today().isoformat()
     return render_template("index.html", rows=rows, q=q, today=today)
@@ -205,10 +216,13 @@ def new():
         deadline = calculate_deadline(datetime.strptime(received, "%Y-%m-%d").date())
 
         db = get_db()
+        user = current_user(_load_user)
+        team = user.team if user else ""
         cur = db.execute(
-            "INSERT INTO requests (ref, requester, subject, received, deadline, status) "
-            "VALUES (?, ?, ?, ?, ?, 'Received')",
-            (ref, requester, subject, received, deadline.isoformat()),
+            "INSERT INTO requests "
+            "(ref, requester, subject, received, deadline, status, team) "
+            "VALUES (?, ?, ?, ?, ?, 'Received', ?)",
+            (ref, requester, subject, received, deadline.isoformat(), team),
         )
         db.commit()
 
@@ -221,8 +235,8 @@ def new():
             "received": received,
             "deadline": deadline.isoformat(),
             "status": "Received",
+            "team": team,
         }
-        user = current_user(_load_user)
         record_event(
             db,
             "request.create",
@@ -242,16 +256,23 @@ def new():
 @login_required
 def detail(req_id):
     db = get_db()
+    user = current_user(_load_user)
+    scope_sql, scope_params = _team_scope_where(user)
+
+    # `scope_sql` is a literal fragment from _team_scope_where.
+    row = db.execute(
+        "SELECT * FROM requests WHERE id = ?" + scope_sql,  # nosec B608
+        (req_id, *scope_params),
+    ).fetchone()
+    # Out-of-team requests 404 rather than 403 — don't confirm the row exists.
+    if row is None:
+        abort(404)
 
     if request.method == "POST":
         status = request.form["status"]
         notes = request.form["notes"]
 
-        before_row = db.execute(
-            "SELECT * FROM requests WHERE id = ?", (req_id,)
-        ).fetchone()
-        if before_row is None:
-            abort(404)
+        before_row = row
 
         db.execute(
             "UPDATE requests SET status = ?, notes = ? WHERE id = ?",
@@ -263,7 +284,6 @@ def detail(req_id):
             "SELECT * FROM requests WHERE id = ?", (req_id,)
         ).fetchone()
 
-        user = current_user(_load_user)
         record_event(
             db,
             "request.update",
@@ -277,9 +297,6 @@ def detail(req_id):
         )
         return redirect(f"/request/{req_id}")
 
-    row = db.execute(
-        "SELECT * FROM requests WHERE id = ?", (req_id,)
-    ).fetchone()
     today = date.today().isoformat()
     return render_template("detail.html", r=row, statuses=STATUSES, today=today)
 

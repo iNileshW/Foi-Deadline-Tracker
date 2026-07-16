@@ -3,6 +3,7 @@
   <h2>{{ r.ref }} — {{ r.subject }}</h2>
   <table>
     <tr><th>Requester</th><td>{{ r.requester }}</td></tr>
+    <tr><th>Team</th><td>{{ r.team or '(unassigned)' }}</td></tr>
     <tr><th>Received</th><td>{{ r.received }}</td></tr>
     <tr><th>Deadline</th><td>{{ r.deadline }} {% if r.deadline < today and r.status != 'Responded' %}<strong>(OVERDUE)</strong>{% endif %}</td></tr>
     <tr><th>Status</th><td>{{ r.status }}</td></tr>

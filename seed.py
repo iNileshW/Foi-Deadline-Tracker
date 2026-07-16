@@ -5,9 +5,8 @@ import os
 import sqlite3
 from datetime import date, timedelta
 
-from audit import init_audit_table
 from deadlines import calculate_deadline
-from users import init_users_table
+from schema import init_all
 
 DB = os.environ.get("FOI_DB", "foi.db")
 
@@ -15,20 +14,7 @@ if os.path.exists(DB):
     os.remove(DB)
 
 conn = sqlite3.connect(DB)
-conn.execute("""
-    CREATE TABLE requests (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ref TEXT,
-        requester TEXT,
-        subject TEXT,
-        received TEXT,
-        deadline TEXT,
-        status TEXT,
-        notes TEXT
-    )
-""")
-init_users_table(conn)
-init_audit_table(conn)
+init_all(conn)
 
 SAMPLE = [
     ("FOI-2026-0141", "J. Whitfield", "Pothole repair spend by borough, 2024-2026", 38, "Responded"),

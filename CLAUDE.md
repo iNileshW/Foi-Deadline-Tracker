@@ -21,6 +21,7 @@ Fixed:
 - ~~No authentication, no per-user identity.~~ Fixed: session-based auth (`auth.py`, `users.py`); passwords hashed with Werkzeug PBKDF2; every route behind `@login_required`; CSRF on all state-changing requests; session id rotated on login; disabled-user flag honoured; 15 auth tests. Users created via `python create_user.py EMAIL ROLE TEAM`.
 - ~~No audit log.~~ Fixed: append-only `audit_events` table (`audit.py`) records login success/failure, logout, request create/update. Each row: actor id + email, action, target, before/after JSON snapshots, IP, user agent, UTC timestamp. Admin-only `/audit` viewer. 13 audit tests including no-password-leak guard.
 - ~~No RBAC.~~ Partial: `admin_required` decorator gates `/audit`. Role column consulted at request time.
+- ~~No team-based data separation on requests.~~ Fixed: `team` column on `requests` (backfilled to `''` = unassigned on legacy rows via idempotent ALTER in `schema.py`). List, detail, update, and search all scope by `team = current_user.team OR team = ''` for non-admins; admins see all. Out-of-team `/request/<id>` returns 404 (no existence leak). POST /new stamps `current_user.team`. 12 team-scoping tests.
 - ~~`foi.db` backup = Gary's USB stick, Fridays, "usually".~~ Fixed: `backup.py` uses SQLite online-backup API (safe under concurrent writes), writes a manifest (sha256, size, table counts) beside each snapshot, prunes to keep-N. `restore.py` verifies the backup before overwriting and keeps a pre-restore safety copy. 10 backup/restore tests including a full round-trip drill. Off-machine copy is left to `rsync` / S3 sync by design.
 
 - ~~No CI.~~ Fixed: `.github/workflows/ci.yml`. Three jobs — pytest across Python 3.11/3.12/3.13, bandit SAST + pip-audit on both requirements files, and a `main`-only tarball artifact. Deploy step deliberately not automated (no target env).
@@ -30,7 +31,6 @@ Fixed:
 - ~~No rate limiting on `/login`.~~ Fixed: `ratelimit.py` — 5 failures per 15-minute rolling window per attempted email OR source IP, sourced from the audit trail so the ICO auditor and the limiter agree on the truth. Sixth attempt returns 429 with `Retry-After`; correct password is refused during lockout. Blocked attempts logged as `login.blocked`.
 
 Still open:
-- No team-based data separation on requests (`team` on users, not yet joined against a `team` column on requests).
 - `seed.py:11` — deletes the DB file unconditionally on run. Destructive.
 - `requirements.txt` — unpinned (`flask`, `gunicorn`).
 - UK GDPR retention policy on requester name/address is undefined.
@@ -46,9 +46,10 @@ Still open:
 - `create_user.py` — CLI to add users (password read from terminal).
 - `templates/` — `base.html`, `index.html`, `new.html`, `detail.html`, `login.html`.
 - `foi.db` — SQLite. Tables:
-  - `requests(id, ref, requester, subject, received, deadline, status, notes)`
+  - `requests(id, ref, requester, subject, received, deadline, status, notes, team)`
   - `users(id, email UNIQUE, password_hash, role, team, created_at, disabled_at)`
   - `audit_events(id, occurred_at, actor_id, actor_email, action, target_type, target_id, before_json, after_json, ip, user_agent)`
+- `schema.py` — single-source-of-truth schema init (`init_all`). Called by `get_db()` and `seed.py`. Idempotent, migrates the `team` column on pre-existing DBs.
 - Statuses: `Received`, `In progress`, `Internal review`, `Responded`, `Overdue`.
 - Roles: `admin`, `caseworker`.
 

@@ -49,13 +49,11 @@ def test_healthz_is_public(client):
     assert r.status_code == 200
 
 
-def test_healthz_returns_503_when_db_missing(tmp_path, monkeypatch):
-    """A path that cannot be opened should surface as unhealthy."""
-    monkeypatch.setattr(app_module, "DB", str(tmp_path / "does-not-exist.db"))
-    # get_db() will create an empty sqlite file. init_users_table +
-    # init_audit_table make users and audit_events. But `requests`
-    # will still be missing (seed.py creates that). /healthz probes
-    # `requests` and should report unhealthy.
+def test_healthz_returns_503_when_db_unreachable(tmp_path, monkeypatch):
+    """A DB path that cannot be opened at all should surface as
+    unhealthy. Pointing at a directory forces sqlite to fail on
+    connect."""
+    monkeypatch.setattr(app_module, "DB", str(tmp_path))  # tmp_path is a dir
     with app_module.app.test_client() as c:
         r = c.get("/healthz")
     assert r.status_code == 503

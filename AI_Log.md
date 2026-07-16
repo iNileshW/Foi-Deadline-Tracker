@@ -806,3 +806,106 @@ HTTP-level (Flask test client):
 - UK GDPR retention policy for requester PII.
 
 ---
+
+## 2026-07-17 — Team-based data separation on requests
+
+**Goal:** team scoping next.
+
+**Files:**
+- `schema.py` (new — single-source `init_all()` covering requests +
+  users + audit; idempotent ALTER for the new column)
+- `app.py` (`_team_scope_where()` helper; list, detail, update, and
+  search now honour scope; POST /new stamps the caller's team)
+- `seed.py` (drops the ad-hoc CREATE TABLE, calls `init_all`)
+- `templates/index.html` (Team column)
+- `templates/detail.html` (Team row)
+- `tests/test_team_scope.py` (new — 12 tests)
+- `tests/test_healthz.py` (updated — /healthz on a fresh empty DB
+  is now healthy because init_all creates the schema on connect;
+  test now forces failure by pointing DB at a directory)
+- `CLAUDE.md` (defect list re-scored)
+
+**Rationale:** Two directorates are joining. A caseworker in
+directorate A must not read, edit, or even be able to *see* a
+request logged by directorate B. Anything less is a UK GDPR problem
+(personal data of requesters visible to teams with no business need)
+and an ICO problem (auditor asks "who has access to this record" and
+the answer is "everyone").
+
+**Design choices:**
+- **Column, not sub-table.** `requests.team TEXT NOT NULL DEFAULT ''`.
+  Cheap to filter, cheap to migrate, cheap to explain to an auditor.
+- **Empty string = legacy unassigned.** Existing seeded rows land
+  in `''` after the ALTER. Policy: unassigned rows are visible to
+  every authenticated user so the migration is soft — no data
+  disappears when the feature ships. Admins are expected to backfill
+  the column and the log flags this as a follow-up.
+- **`_team_scope_where(user)` returns `(sql_fragment, params)`.**
+  For non-admins the fragment is `AND (team = ? OR team = '')`. For
+  admins, empty string + empty list (see everything). Composed into
+  parameter-bound queries so bandit's B608 finding is a false
+  positive; the fragment is a literal and the value is a bound `?`.
+  Annotated `# nosec B608` with a comment on every touch site.
+- **404, not 403, for out-of-team `/request/<id>`.** Consistent with
+  the enumeration-guard rationale in `authenticate` — an attacker
+  probing "does request 42 exist?" gets the same 404 whether the
+  row is missing or belongs to another team.
+- **`schema.init_all()` unifies schema creation.** `seed.py` and
+  `get_db()` used to run overlapping-but-not-identical CREATE TABLE
+  statements. Now both call one function. The ALTER logic
+  (`_ensure_team_column`) lives beside the CREATE, so a future
+  column migration follows the same pattern.
+- **/healthz semantics evolved.** Previously it treated "no
+  `requests` table" as unhealthy. Now `get_db()` creates the schema
+  on connect (that's the whole point of `init_all`), so a fresh
+  empty DB reports healthy. The test now forces an actual failure
+  by pointing `FOI_DB` at a directory — `sqlite3.connect()` on that
+  path fails, `/healthz` reports unhealthy. Real-world failure mode
+  (permissions, volume gone, path is a dir) is what matters.
+
+**Test coverage (`tests/test_team_scope.py`, 12 tests):**
+
+List view:
+- Caseworker on team `central` sees only central + legacy rows.
+- Caseworker on team `rail` sees only rail + legacy rows.
+- Admin sees everything.
+
+Detail view:
+- Caseworker cannot GET a request owned by another team → 404.
+- Caseworker can GET a request owned by own team → 200.
+- Caseworker can GET a legacy (`''`) request → 200.
+- Admin can GET any request.
+
+Update prevention:
+- Caseworker POST to another team's `/request/<id>` → 404, and the
+  target row is not modified.
+
+Create stamping:
+- POST /new by a `central` caseworker writes `team='central'`.
+- Rows created by team `rail` are invisible to team `central` in the
+  list view.
+
+Search:
+- Search query on team `central` does not surface a matching row
+  from team `rail`.
+
+Migration:
+- A pre-existing `requests` table (no `team` column) picks up the
+  column when `init_requests_table` runs, and legacy rows become
+  `team=''`.
+
+**Verification:**
+- `python3 -m pytest tests/` → 88 passed
+  (10 deadline + 6 injection + 6 config + 15 auth + 13 audit +
+   10 backup + 3 healthz + 13 ratelimit + 12 team_scope).
+- `bandit -r . -x ./tests,./templates,./.github,./backups -ll` →
+  0 findings, 5 in-source `# nosec` suppressions with reasons.
+
+**Follow-ups (next):**
+- Backfill the `team` column on the existing seeded rows so nothing
+  is left as `''` in the demo.
+- Pin `requirements.txt`.
+- UK GDPR retention policy for requester name/address.
+- Kill the destructive `seed.py`.
+
+---
