@@ -1,2 +1,11 @@
+# Test-only dependencies. Layered on requirements.txt so pip-audit
+# sees runtime + dev in one pass.
 -r requirements.txt
-pytest
+
+# --- direct ---
+pytest==9.1.1
+
+# --- transitive (pytest) ---
+iniconfig==2.3.0
+pluggy==1.6.0
+Pygments==2.20.0

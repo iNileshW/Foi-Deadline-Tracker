@@ -1012,3 +1012,52 @@ HTTP (Flask test client, 6 tests):
 - Backfill `team` on the seeded demo rows.
 
 ---
+
+## 2026-07-17 — Pin runtime and dev dependency versions
+
+**Goal:** pin requirements.txt next.
+
+**Files:**
+- `requirements.txt` (was `flask` + `gunicorn` unpinned; now
+  `Flask==3.1.3`, `gunicorn==26.0.0`, plus every transitive
+  Flask + gunicorn dep pinned exactly)
+- `requirements-dev.txt` (still layered on `-r requirements.txt`,
+  now also pins `pytest==9.1.1` and its transitives)
+- `CLAUDE.md` (defect list re-scored; pinning closed)
+
+**Rationale:** pip-audit results and Docker builds must be
+reproducible. Without pinning, "no known vulnerabilities" is only
+true for whatever pip happens to resolve at build time — a fresh
+transitive can slip in a CVE between CI runs, and there is no way
+to tell from `git diff`. Pinning also makes the container image
+identical across rebuilds, which the ICO auditor cares about for
+"did the deployed code match what was tested".
+
+**Design choices:**
+- **Full lockfile-style pinning**, not just directs. A `Flask` bump
+  that widens a `Werkzeug` version range would otherwise pull a
+  new Werkzeug silently. Explicit rows for every transitive.
+- **Grouped by origin.** Direct deps first, then a `# transitive
+  (Flask)` block, then `# transitive (gunicorn)`. Reader can see
+  what to touch when bumping a direct.
+- **Regeneration recipe in a header comment.** `python -m venv /tmp/v
+  && /tmp/v/bin/pip install flask gunicorn && /tmp/v/bin/pip
+  freeze`. No `pip-tools` dependency added — a `pip freeze` on a
+  clean venv gets us there with tooling everyone already has.
+- **Dev deps stay layered.** `requirements-dev.txt` still `-r
+  requirements.txt` so pip-audit sees the whole tree in one pass.
+
+**Verification:**
+- Fresh throwaway venv: `pip install -r requirements-dev.txt` — no
+  errors.
+- `pip-audit --strict -r requirements.txt` — no known vulnerabilities.
+- `pip-audit --strict -r requirements-dev.txt` — no known
+  vulnerabilities.
+- `python -m pytest tests/` inside the venv → 103 passed.
+
+**Follow-ups (next):**
+- Kill destructive `seed.py`. Replace with an `init.py` that
+  refuses to overwrite an existing DB.
+- Backfill `team` on the seeded demo rows.
+
+---

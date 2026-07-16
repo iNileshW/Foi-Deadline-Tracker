@@ -32,9 +32,10 @@ Fixed:
 
 - ~~UK GDPR retention policy on requester name/address is undefined.~~ Fixed: default 3-year (1095-day) retention window after a request is marked Responded. `retention.py` provides `find_due`, `redact_request`, `purge_due`, and a CLI (`--dry-run` supported). `responded_at` auto-stamped when status transitions to Responded. Admin-only `POST /request/<id>/erase-pii` for on-demand DSAR erasure. Redaction wipes `requester` + `notes` only; case metadata retained for FOI stats. Every erasure writes a `request.erase_pii` audit row.
 
+- ~~`requirements.txt` unpinned.~~ Fixed: full lockfile-style pinning of direct and transitive deps in `requirements.txt` (runtime) and `requirements-dev.txt` (adds pytest). pip-audit and Docker builds are now reproducible.
+
 Still open:
 - `seed.py:11` — deletes the DB file unconditionally on run. Destructive.
-- `requirements.txt` — unpinned (`flask`, `gunicorn`).
 
 ## Architecture
 
