@@ -30,10 +30,11 @@ Fixed:
 
 - ~~No rate limiting on `/login`.~~ Fixed: `ratelimit.py` — 5 failures per 15-minute rolling window per attempted email OR source IP, sourced from the audit trail so the ICO auditor and the limiter agree on the truth. Sixth attempt returns 429 with `Retry-After`; correct password is refused during lockout. Blocked attempts logged as `login.blocked`.
 
+- ~~UK GDPR retention policy on requester name/address is undefined.~~ Fixed: default 3-year (1095-day) retention window after a request is marked Responded. `retention.py` provides `find_due`, `redact_request`, `purge_due`, and a CLI (`--dry-run` supported). `responded_at` auto-stamped when status transitions to Responded. Admin-only `POST /request/<id>/erase-pii` for on-demand DSAR erasure. Redaction wipes `requester` + `notes` only; case metadata retained for FOI stats. Every erasure writes a `request.erase_pii` audit row.
+
 Still open:
 - `seed.py:11` — deletes the DB file unconditionally on run. Destructive.
 - `requirements.txt` — unpinned (`flask`, `gunicorn`).
-- UK GDPR retention policy on requester name/address is undefined.
 
 ## Architecture
 
@@ -46,7 +47,7 @@ Still open:
 - `create_user.py` — CLI to add users (password read from terminal).
 - `templates/` — `base.html`, `index.html`, `new.html`, `detail.html`, `login.html`.
 - `foi.db` — SQLite. Tables:
-  - `requests(id, ref, requester, subject, received, deadline, status, notes, team)`
+  - `requests(id, ref, requester, subject, received, deadline, status, notes, team, responded_at, pii_redacted_at)`
   - `users(id, email UNIQUE, password_hash, role, team, created_at, disabled_at)`
   - `audit_events(id, occurred_at, actor_id, actor_email, action, target_type, target_id, before_json, after_json, ip, user_agent)`
 - `schema.py` — single-source-of-truth schema init (`init_all`). Called by `get_db()` and `seed.py`. Idempotent, migrates the `team` column on pre-existing DBs.

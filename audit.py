@@ -42,6 +42,7 @@ ACTIONS = {
     "request.create",
     "request.update",
     "request.view",  # reserved for later
+    "request.erase_pii",  # requester name + notes redacted (retention or DSAR)
 }
 
 

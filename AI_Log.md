@@ -909,3 +909,106 @@ Migration:
 - Kill the destructive `seed.py`.
 
 ---
+
+## 2026-07-17 — UK GDPR retention: 3-year purge + DSAR erasure route
+
+**Goal:** UK GDPR retention next.
+
+**Files:**
+- `retention.py` (new — `find_due`, `redact_request`, `purge_due`,
+  CLI with `--dry-run`)
+- `schema.py` (new columns `requests.responded_at`,
+  `requests.pii_redacted_at`; generalised `_ensure_column` helper)
+- `app.py` (`responded_at` auto-stamped on status transition to
+  Responded; new admin route `POST /request/<id>/erase-pii`)
+- `audit.py` (adds `request.erase_pii` to ACTIONS)
+- `templates/detail.html` (redaction banner, admin-only erase form,
+  flash messages, `responded_at` row)
+- `.env.example` (documents `FOI_RETENTION_DAYS`)
+- `README.md` (retention policy + DSAR runbook)
+- `tests/test_retention.py` (new — 15 tests, library + HTTP)
+- `CLAUDE.md` (defect list re-scored; retention closed)
+
+**Rationale:** UK GDPR requires that personal data is not kept
+longer than necessary. Requester names and free-text notes are
+personal data. Case metadata is not — the annual FOI statistical
+return depends on it, so it must survive redaction. The ICO audit
+brief asks about retention explicitly.
+
+**Policy chosen:**
+- Retention window: **1095 days (3 years) after a request is
+  marked Responded**. Configurable via `FOI_RETENTION_DAYS`.
+- Trigger: status transition to `Responded` stamps `responded_at`
+  (UTC ISO-8601). A subsequent Responded → Responded update does
+  not overwrite the stamp.
+- Purge scope: `requester` and `notes` columns → `[REDACTED]`.
+  Everything else stays.
+- Redaction is not deletion. The row remains, `pii_redacted_at` is
+  stamped, an audit row is written.
+
+**Design choices:**
+- **Two entry points to the same primitive.** `redact_request()` is
+  the shared function; `purge_due()` iterates it for scheduled
+  runs and the `/erase-pii` route calls it directly. This means
+  the ICO auditor sees identical audit rows regardless of trigger.
+- **Idempotent.** A row already marked `pii_redacted_at IS NOT NULL`
+  is a no-op. Re-running the CLI, or double-clicking the admin
+  button, cannot cause data loss beyond the first redaction.
+- **Dry-run.** The CLI's `--dry-run` prints candidate rows without
+  changing anything, so an admin can preview what a scheduled cron
+  would touch.
+- **Admin-only DSAR route.** `POST /request/<id>/erase-pii` behind
+  `@admin_required`. Reason (free-text) is captured in the audit
+  trail so the auditor can trace *why* a specific row was redacted
+  (DSAR request from requester X, cited case Y, etc.).
+- **Confirmation.** Detail-page form uses a browser `confirm()`
+  before submitting, plus a hidden CSRF token. Not a security
+  boundary — the audit + admin-role gate is — just a UX safety net.
+- **`responded_at` behaviour.** Transition-based, not idempotent
+  set-every-time. If you demote a request from Responded (unusual
+  but possible) then re-mark it Responded, `responded_at` refreshes;
+  if you save the form with the same status, it does not.
+- **Storage:** JSON before/after snapshots in the audit trail
+  capture the pre-redaction values, so the "who had access" question
+  ("what was requester's name before we redacted?") is answerable —
+  by an admin with audit-trail access, i.e. the ICO's own model.
+
+**Test coverage (`tests/test_retention.py`, 15 tests):**
+
+Library (`retention.*`, 9 tests):
+- `find_due` returns Responded rows past the window, skips recent,
+  skips still-open requests.
+- `find_due` skips rows that are already redacted.
+- `redact_request` wipes `requester` + `notes` only; keeps `ref`,
+  `subject`, `received`, `deadline`, `status`, `team`.
+- `redact_request` sets `pii_redacted_at`.
+- Second call on the same row is a no-op (returns False).
+- Missing row → False.
+- Audit event written with actor id, before, after, reason.
+- `purge_due` redacts everything currently due and returns their ids.
+- `purge_due(dry_run=True)` touches nothing.
+- Configurable window: `days=50` and `days=200` return different sets.
+
+HTTP (Flask test client, 6 tests):
+- Caseworker POST → 403.
+- Anonymous POST (with valid CSRF) → 302 to /login.
+- POST without CSRF → 400.
+- Admin POST → 302, row is redacted, audit row present.
+- POST for a missing request id → 404.
+- Status transition to Responded via POST /request/<id> stamps
+  `responded_at`.
+
+**Verification:**
+- `python3 -m pytest tests/` → 103 passed
+  (10 deadline + 6 injection + 6 config + 15 auth + 13 audit +
+   10 backup + 3 healthz + 13 ratelimit + 12 team_scope + 15 retention).
+- `bandit -r . -x ./tests,./templates,./.github,./backups -ll` →
+  0 findings, 5 in-source `# nosec` suppressions with reasons.
+
+**Follow-ups (next):**
+- Pin `requirements.txt` (reproducible pip-audit results).
+- Kill the destructive `seed.py` — replace with an initialisation
+  script that refuses to overwrite existing data.
+- Backfill `team` on the seeded demo rows.
+
+---

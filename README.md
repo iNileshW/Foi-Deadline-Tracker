@@ -147,6 +147,42 @@ python restore.py backups/foi-<timestamp>.db foi.db
 Run the drill at least monthly. A backup no-one has restored is a
 hypothesis.
 
+## UK GDPR retention
+
+Requester name and free-text notes are personal data. Under UK GDPR
+they must not be kept longer than necessary. Case metadata (ref,
+subject, dates, status, deadline, team) is not personal data and is
+retained to support the annual FOI return.
+
+Default retention window: **3 years (1095 days) after a request is
+marked Responded**. Configurable via `FOI_RETENTION_DAYS`.
+
+### Scheduled purge
+
+```
+python retention.py --dry-run   # list candidates
+python retention.py             # redact due rows
+```
+
+Cron example (weekly, Sunday 03:00):
+
+```
+0 3 * * 0 cd /path/to/foi-tracker && /usr/bin/python3 retention.py >> retention.log 2>&1
+```
+
+Each redaction writes a `request.erase_pii` row to the audit trail —
+timestamp, actor id, before/after JSON, IP, user agent. Idempotent:
+rerunning is a no-op on rows that have already been redacted.
+
+### Right to erasure (DSAR)
+
+An admin can trigger redaction on demand from the request detail page
+(`POST /request/<id>/erase-pii`). Reason is captured in the audit
+trail and shown to future readers of the record.
+
+Redaction is intentionally not deletion — the row is retained with a
+`pii_redacted_at` timestamp so the audit trail remains coherent.
+
 ## Notes
 
 - Deadlines are 20 working days from receipt (weekends excluded).

@@ -1,12 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
   <h2>{{ r.ref }} — {{ r.subject }}</h2>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, msg in messages %}
+      <p class="flash flash-{{ category }}">{{ msg }}</p>
+    {% endfor %}
+  {% endwith %}
+  {% if r.pii_redacted_at %}
+    <p class="flash">Requester PII redacted at {{ r.pii_redacted_at }} (UK GDPR).</p>
+  {% endif %}
   <table>
     <tr><th>Requester</th><td>{{ r.requester }}</td></tr>
     <tr><th>Team</th><td>{{ r.team or '(unassigned)' }}</td></tr>
     <tr><th>Received</th><td>{{ r.received }}</td></tr>
     <tr><th>Deadline</th><td>{{ r.deadline }} {% if r.deadline < today and r.status != 'Responded' %}<strong>(OVERDUE)</strong>{% endif %}</td></tr>
     <tr><th>Status</th><td>{{ r.status }}</td></tr>
+    {% if r.responded_at %}<tr><th>Responded at</th><td>{{ r.responded_at }}</td></tr>{% endif %}
   </table>
 
   <h3>Update</h3>
@@ -24,4 +33,16 @@
 
     <button type="submit">Save changes</button>
   </form>
+
+  {% if current_user and current_user.role == 'admin' and not r.pii_redacted_at %}
+  <h3>Erase requester PII</h3>
+  <p class="hint">Under UK GDPR right-to-erasure. Redacts the requester
+    name and notes; keeps case metadata for statistical reporting.</p>
+  <form method="post" action="/request/{{ r.id }}/erase-pii" onsubmit="return confirm('Redact requester PII on {{ r.ref }}? This cannot be undone.');">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <label for="reason">Reason (recorded in audit trail)</label>
+    <input type="text" id="reason" name="reason" placeholder="e.g. DSAR from requester">
+    <button type="submit">Erase PII</button>
+  </form>
+  {% endif %}
 {% endblock %}

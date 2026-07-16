@@ -28,22 +28,30 @@ def init_requests_table(conn: sqlite3.Connection) -> None:
             deadline TEXT,
             status TEXT,
             notes TEXT,
-            team TEXT NOT NULL DEFAULT ''
+            team TEXT NOT NULL DEFAULT '',
+            responded_at TEXT,
+            pii_redacted_at TEXT
         )
         """
     )
-    _ensure_team_column(conn)
+    _ensure_column(
+        conn, "requests", "team",
+        "ALTER TABLE requests ADD COLUMN team TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_column(
+        conn, "requests", "responded_at",
+        "ALTER TABLE requests ADD COLUMN responded_at TEXT",
+    )
+    _ensure_column(
+        conn, "requests", "pii_redacted_at",
+        "ALTER TABLE requests ADD COLUMN pii_redacted_at TEXT",
+    )
 
 
-def _ensure_team_column(conn: sqlite3.Connection) -> None:
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(requests)")}
-    if "team" not in cols:
-        # Existing rows become "unassigned" (empty string). App-level
-        # policy shows unassigned rows to all authenticated users until
-        # an admin backfills the column.
-        conn.execute(
-            "ALTER TABLE requests ADD COLUMN team TEXT NOT NULL DEFAULT ''"
-        )
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(ddl)
 
 
 def init_all(conn: sqlite3.Connection) -> None:

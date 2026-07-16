@@ -4,7 +4,7 @@
 import os
 import secrets
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from flask import (
     Flask,
@@ -31,6 +31,7 @@ from auth import (
 )
 from deadlines import calculate_deadline
 from ratelimit import is_locked, seconds_until_unlock
+from retention import redact_request
 from schema import init_all
 from users import authenticate, get_user_by_id
 
@@ -273,11 +274,22 @@ def detail(req_id):
         notes = request.form["notes"]
 
         before_row = row
-
-        db.execute(
-            "UPDATE requests SET status = ?, notes = ? WHERE id = ?",
-            (status, notes, req_id),
+        # Stamp responded_at on the transition to Responded. Do not
+        # overwrite on subsequent Responded → Responded updates.
+        transitioning = (
+            status == "Responded" and before_row["status"] != "Responded"
         )
+        if transitioning:
+            responded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            db.execute(
+                "UPDATE requests SET status = ?, notes = ?, responded_at = ? WHERE id = ?",
+                (status, notes, responded_at, req_id),
+            )
+        else:
+            db.execute(
+                "UPDATE requests SET status = ?, notes = ? WHERE id = ?",
+                (status, notes, req_id),
+            )
         db.commit()
 
         after_row = db.execute(
@@ -318,6 +330,40 @@ def healthz():
     except Exception:
         return {"status": "unhealthy"}, 503
     return {"status": "ok"}, 200
+
+
+@app.route("/request/<int:req_id>/erase-pii", methods=["POST"])
+@admin_required(_load_user)
+def erase_pii(req_id):
+    """DSAR / right-to-erasure endpoint. Admin-only.
+
+    Redacts the requester name and free-text notes. Case metadata
+    (ref, subject, dates, status, deadline, team) is retained so the
+    FOI statistical return survives the redaction.
+    """
+    db = get_db()
+    ctx = _request_context()
+    reason = request.form.get("reason", "").strip() or "admin request"
+    user = current_user(_load_user)
+    ok = redact_request(
+        db,
+        req_id,
+        actor=user,
+        reason=reason,
+        ip=ctx["ip"],
+        user_agent=ctx["user_agent"],
+    )
+    if not ok:
+        # Row missing or already redacted — either way, no state change.
+        row = db.execute(
+            "SELECT id FROM requests WHERE id = ?", (req_id,)
+        ).fetchone()
+        if row is None:
+            abort(404)
+        flash("Request PII was already redacted.", "error")
+    else:
+        flash("Requester PII redacted.", "success")
+    return redirect(f"/request/{req_id}")
 
 
 @app.route("/audit")
