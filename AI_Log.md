@@ -723,3 +723,86 @@ block still fires under podman. Under real Docker Engine both work.
 - Team-based data separation on requests.
 
 ---
+
+## 2026-07-16 — Rate-limit /login
+
+**Goal:** rate-limit /login next.
+
+**Files:**
+- `ratelimit.py` (new — `failure_count`, `is_locked`, `seconds_until_unlock`)
+- `audit.py` (adds `login.blocked` to the ACTIONS set)
+- `app.py` (checks lockout before touching `authenticate`; on lockout
+  returns 429 with `Retry-After` and records `login.blocked`; imports
+  `make_response`)
+- `tests/test_ratelimit.py` (new — 13 tests, 8 library + 5 HTTP)
+- `CLAUDE.md` (defect list re-scored)
+
+**Rationale:** The audit trail records brute-force attempts but does
+not slow them down. A 15-minute lockout after 5 failures is enough
+to make credential-stuffing uneconomic without punishing a genuine
+user who mistypes their password twice.
+
+**Design choices:**
+- **Data source = `audit_events`.** No new table. The rate limiter
+  reads the same rows the auditor reads. If they diverge, the
+  auditor's version is definitive.
+- **Threshold: 5 failures / 15-minute rolling window** (`MAX_FAILURES`,
+  `WINDOW_MINUTES` in `ratelimit.py`). Straight rolling count of
+  `login.failure` rows in the window whose `actor_email` or `ip`
+  matches. `email OR ip` keys mean:
+  - a single email being attacked from many IPs still locks
+    (attacker rotates source IP → email counter catches it)
+  - a single IP scanning many emails still locks
+    (attacker rotates emails → IP counter catches it)
+- **Locked response = 429 with `Retry-After`.** Value is computed
+  from the oldest matching failure in the window. Never distinguishes
+  "locked because password wrong" from "locked because unknown user"
+  — both categories go through the same code path.
+- **Check runs before `authenticate`.** During lockout, even the
+  correct password is refused. This is intentional — an attacker
+  who guesses the password on attempt 6 should not get in.
+- **New audit action `login.blocked`.** Distinct from `login.failure`
+  so the ICO auditor can tell "we refused this without checking"
+  from "credentials rejected". Blocked attempts do *not* count toward
+  the failure total (would cause exponential lockout after unlock).
+- **`_now` seam** (`now=` kwarg on `failure_count`, `is_locked`,
+  `seconds_until_unlock`) lets tests seed old timestamps and prove
+  window expiry without a real `time.sleep`.
+- Bandit `# nosec B608` on both dynamic-`WHERE` queries in
+  `ratelimit.py`: the fragments are literal SQL, only parameter
+  values come from callers, all bound with `?`.
+
+**Test coverage (`tests/test_ratelimit.py`, 13 tests):**
+
+Library-level (`ratelimit.*`):
+- Empty audit → count 0, not locked.
+- Failures within window are counted (by email, by IP).
+- `email OR ip` match: rows matching either key contribute.
+- Lock triggers exactly at `MAX_FAILURES`.
+- Failures older than `WINDOW_MINUTES` release the lock.
+- `seconds_until_unlock` roughly equals `WINDOW_MINUTES * 60` when
+  the failure is fresh.
+- Zero when nothing is locked.
+- Missing both keys → 0 / not locked (defensive).
+
+HTTP-level (Flask test client):
+- Five 401s, then the sixth request returns 429 with a `Retry-After`
+  header ≥ 1.
+- Correct password rejected during lockout (session unchanged).
+- Blocked attempt writes a `login.blocked` audit row.
+- IP throttle survives email rotation.
+- Unknown email still yields 401 (not 429) before threshold reached.
+
+**Verification:**
+- `python3 -m pytest tests/` → 76 passed
+  (10 deadline + 6 injection + 6 config + 15 auth + 13 audit +
+   10 backup + 3 healthz + 13 ratelimit).
+- `bandit -r . -x ./tests,./templates,./.github,./backups -ll`:
+  0 findings, 4 in-source suppressions (all with reason).
+
+**Follow-ups (next):**
+- Team-based data separation on `requests`.
+- Pin dependency versions in `requirements.txt`.
+- UK GDPR retention policy for requester PII.
+
+---

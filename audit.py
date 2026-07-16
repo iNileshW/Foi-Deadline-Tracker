@@ -37,6 +37,7 @@ USER_AGENT_MAX = 255
 ACTIONS = {
     "login.success",
     "login.failure",
+    "login.blocked",   # rate-limiter refused the attempt without checking creds
     "logout",
     "request.create",
     "request.update",

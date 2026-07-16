@@ -27,11 +27,12 @@ Fixed:
 
 - ~~No container.~~ Fixed: `Dockerfile` + `docker-compose.yml`. Runs under gunicorn (Flask dev server is not production-safe), non-root UID 10001, `/healthz` probe wired to `HEALTHCHECK`, data on a mounted volume so `docker compose down` doesn't destroy the DB. CI builds the image on every push.
 
+- ~~No rate limiting on `/login`.~~ Fixed: `ratelimit.py` — 5 failures per 15-minute rolling window per attempted email OR source IP, sourced from the audit trail so the ICO auditor and the limiter agree on the truth. Sixth attempt returns 429 with `Retry-After`; correct password is refused during lockout. Blocked attempts logged as `login.blocked`.
+
 Still open:
 - No team-based data separation on requests (`team` on users, not yet joined against a `team` column on requests).
 - `seed.py:11` — deletes the DB file unconditionally on run. Destructive.
 - `requirements.txt` — unpinned (`flask`, `gunicorn`).
-- No rate limiting on `/login`. Brute-force protection is on the to-do list.
 - UK GDPR retention policy on requester name/address is undefined.
 
 ## Architecture

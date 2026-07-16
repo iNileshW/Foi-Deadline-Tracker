@@ -11,6 +11,7 @@ from flask import (
     abort,
     flash,
     g,
+    make_response,
     redirect,
     render_template,
     request,
@@ -29,6 +30,7 @@ from auth import (
     verify_csrf,
 )
 from deadlines import calculate_deadline
+from ratelimit import is_locked, seconds_until_unlock
 from users import authenticate, get_user_by_id, init_users_table
 
 
@@ -113,13 +115,30 @@ def login():
         email = request.form.get("email", "")
         password = request.form.get("password", "")
         db = get_db()
+        ctx = _request_context()
+        norm_email = email.lower().strip() or None
+        ip = ctx["ip"]
+
+        if is_locked(db, email=norm_email, ip=ip):
+            retry = seconds_until_unlock(db, email=norm_email, ip=ip)
+            record_event(
+                db,
+                "login.blocked",
+                actor_email=norm_email,
+                **ctx,
+            )
+            flash("Too many failed attempts. Try again later.", "error")
+            resp = make_response(render_template("login.html"), 429)
+            resp.headers["Retry-After"] = str(retry)
+            return resp
+
         user = authenticate(db, email, password)
         if user is None:
             record_event(
                 db,
                 "login.failure",
-                actor_email=email.lower().strip() or None,
-                **_request_context(),
+                actor_email=norm_email,
+                **ctx,
             )
             flash("Invalid email or password.", "error")
             return render_template("login.html"), 401
@@ -129,7 +148,7 @@ def login():
             "login.success",
             actor_id=user.id,
             actor_email=user.email,
-            **_request_context(),
+            **ctx,
         )
         next_url = request.args.get("next") or url_for("index")
         if not next_url.startswith("/"):
